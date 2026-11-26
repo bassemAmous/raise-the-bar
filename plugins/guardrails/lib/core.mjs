@@ -14,7 +14,7 @@ export const DEFAULTS = {
   productionCommands: [],
   // A push that only touches these paths needs no test run and no review.
   ignorePaths: ["**/*.md", "docs/**", "LICENSE", ".gitignore"],
-  tests: { required: true, command: null },
+  tests: { required: true, command: null, allowUntracked: false },
   review: { required: true },
   approval: { phrase: "approve production", maxAgeMinutes: 60 },
   secretScan: { enabled: true, allowPaths: [] },
@@ -55,6 +55,8 @@ export function git(args, cwd) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 15000,
+    // A first commit or a lockfile is easily over Node's 1 MB default.
+    maxBuffer: 256 * 1024 * 1024,
   }).trim();
 }
 
@@ -94,15 +96,60 @@ function findConfigFile(start) {
   return null;
 }
 
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isStringList = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/**
+ * The config for a folder: the defaults, with the project's file on top.
+ * It never throws. A file that cannot be used sets `config.error`, and the caller refuses
+ * guarded commands until it is fixed: a broken config must not quietly switch the guard off.
+ */
 export function loadConfig(cwd) {
-  const file = findConfigFile(cwd);
+  const file = cwd ? findConfigFile(cwd) : null;
+  const problems = [];
   let user = {};
-  if (file) user = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (file) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8").replace(/^﻿/, ""));
+      if (isObject(parsed)) user = parsed;
+      else problems.push("the file must hold one JSON object");
+    } catch (error) {
+      problems.push(`it is not valid JSON (${error.message})`);
+    }
+  }
   const config = { ...DEFAULTS, ...user };
   for (const key of ["tests", "review", "approval", "secretScan", "dangerGuard"]) {
-    config[key] = { ...DEFAULTS[key], ...(user[key] ?? {}) };
+    if (user[key] !== undefined && !isObject(user[key])) problems.push(`"${key}" must be an object`);
+    config[key] = { ...DEFAULTS[key], ...(isObject(user[key]) ? user[key] : {}) };
+  }
+  for (const key of ["protectedBranches", "productionBranches", "productionCommands", "ignorePaths"]) {
+    if (isStringList(config[key])) continue;
+    problems.push(`"${key}" must be a list of strings`);
+    config[key] = DEFAULTS[key];
+  }
+  if (!isStringList(config.secretScan.allowPaths)) {
+    problems.push('"secretScan.allowPaths" must be a list of strings');
+    config.secretScan.allowPaths = [];
+  }
+  config.productionCommands = config.productionCommands.filter((source) => {
+    try {
+      new RegExp(source, "i");
+      return true;
+    } catch (error) {
+      problems.push(`productionCommands has a pattern that does not compile: ${source} (${error.message})`);
+      return false;
+    }
+  });
+  if (typeof config.approval.phrase !== "string" || !config.approval.phrase.trim()) {
+    problems.push('"approval.phrase" must be a non-empty string');
+    config.approval.phrase = DEFAULTS.approval.phrase;
+  }
+  if (!(Number(config.approval.maxAgeMinutes) > 0)) {
+    problems.push('"approval.maxAgeMinutes" must be a number above 0');
+    config.approval.maxAgeMinutes = DEFAULTS.approval.maxAgeMinutes;
   }
   config.file = file ? slash(file) : null;
+  config.error = problems.length ? problems.join("; ") : null;
   return config;
 }
 

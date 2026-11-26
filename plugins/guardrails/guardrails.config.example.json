@@ -24,7 +24,8 @@
   ],
   "tests": {
     "required": true,
-    "command": "npm test"
+    "command": "npm test",
+    "allowUntracked": false
   },
   "review": {
     "required": true

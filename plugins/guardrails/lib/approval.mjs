@@ -36,11 +36,15 @@ export function isTypedByHuman(row) {
   if (row.type !== "user" || row.isMeta) return false;
   // A summary written after compaction restates old text. It is not something a person typed now.
   if (row.isCompactSummary || row.isVisibleInTranscriptOnly) return false;
-  if (row.promptSource !== undefined)
+  if (row.promptSource !== undefined) {
+    // The editor extensions send what a person types through the SDK, and mark the turn as
+    // human. A program driving the SDK is marked "sdk", and does not count.
+    if (row.promptSource === "sdk") return row.turnOrigin === "human";
     return (
       (row.promptSource === "typed" || row.promptSource === "queued") &&
       (row.turnOrigin === undefined || row.turnOrigin === "human")
     );
+  }
   if (row.turnOrigin !== undefined) return row.turnOrigin === "human";
   // Older logs carry no origin. Plain typed text counts; slash commands and command output
   // (which a hook or a program can write) do not.
@@ -85,18 +89,20 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * Did a person approve this commit?
  * The typed line is the phrase followed by at least the first 7 characters of the commit id,
  * for example: approve production 3f2a9c1
+ * It must stand alone on its line. "do not approve production 3f2a9c1 yet" approves nothing.
  * Outside a git repository there is no commit to name: the line is the phrase and the word
  * "now", and it only counts for 10 minutes.
  */
 export function typedApproval({ transcriptPath, phrase, head, maxAgeMinutes, now = Date.now() }) {
-  const words = escapeRegExp(phrase).replace(/\s+/g, "\\s+");
-  const pattern = new RegExp(`${words}\\s+(${head ? "[0-9a-f]{7,40}" : "now"})\\b`, "i");
+  const words = escapeRegExp(phrase.trim()).replace(/\s+/g, "\\s+");
+  const pattern = new RegExp(`^[ \\t]*${words}[ \\t]+(${head ? "[0-9a-f]{7,40}" : "now"})[ \\t]*[.!]?[ \\t]*\\r?$`, "im");
   const maxAge = (head ? maxAgeMinutes : Math.min(maxAgeMinutes, 10)) * 60000;
   for (const line of typedLines(transcriptPath).reverse()) {
     const match = line.text.match(pattern);
     if (!match) continue;
     if (head && !head.startsWith(match[1].toLowerCase())) continue;
-    if (line.at === null || now - line.at > maxAge) continue;
+    // No time, too old, or dated in the future (a clock or a forged row): not counted.
+    if (line.at === null || now - line.at > maxAge || line.at - now > 60000) continue;
     return { via: "chat", at: new Date(line.at).toISOString() };
   }
   return null;

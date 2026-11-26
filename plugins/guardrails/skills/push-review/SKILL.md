@@ -52,7 +52,8 @@ Not for a feature branch nobody deploys from: push those freely.
    the report, and into the backlog if they will not be fixed now.
 
 6. **Write the report and record it.** Write the report to a file outside the repository. It
-   must name the commit (its first 8 characters) and end with exactly these three lines:
+   must name the commit (its first 8 characters) and its last three lines must be exactly
+   these, in this order, with nothing after them:
 
    ```
    VERDICT: PASS
@@ -68,11 +69,14 @@ Not for a feature branch nobody deploys from: push those freely.
 7. **Production: stop for the human.** If the target is a production branch, you cannot finish
    alone. Say in plain words what will ship (the commit, the changed areas, anything that does
    not ship with the code, such as a new environment variable or a data change), and ask the
-   human to type the approval line the guard shows, for example `approve production 3f2a9c1e`.
+   human to type the approval line the guard shows, alone on its line, for example
+   `approve production 3f2a9c1e`.
    Do not look for another way. The approval is the one step that is not yours.
 
-8. **Push.** Send the same push again. If the guard still refuses, read its list: it names
-   exactly what is missing.
+8. **Push.** Send the same push again, as its own command: not chained after a commit, a merge
+   or a script. The guard judges a line before it runs, so it refuses a push that follows
+   something that changes the code. If the guard still refuses, read its list: it names exactly
+   what is missing.
 
 ## What the reviewer looks for
 

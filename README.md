@@ -11,7 +11,8 @@ production without a person saying yes.
 
 ![The guard refuses a push to main and lists what is missing](assets/guardrails-demo.svg)
 
-That is real output. Reproduce it with `node plugins/guardrails/scripts/demo.mjs`.
+That is real output, and the picture is generated from it. Reproduce it with
+`node plugins/guardrails/scripts/demo.mjs`.
 
 ## Install
 
@@ -98,15 +99,19 @@ config file with no project-specific rules.
 - **Hooks are guardrails, not a sandbox.** They stop mistakes and shortcuts. An agent that sets
   out to defeat them on a machine it controls can find a way. Keep the server-side protections:
   branch protection, required reviews, deploy permissions.
+- The hook judges a command before it runs. So a push to a protected branch has to be sent as
+  its own command, not chained after the commit that creates the code. The guard says so.
+- A test pass is recorded by the tool that ran the tests. A review pass is recorded from a report
+  the agent hands in. The first is hard to fake; the second is kept for a person to read.
 - The secret scan knows common key formats. It is not a replacement for a full scanner in CI.
 - Skills are instructions a model follows. They raise the floor; they do not guarantee a result.
 
 ## Development
 
 ```
-node --test plugins/guardrails/tests/     # 16 tests on real temporary git repositories
-claude plugin validate .                  # the marketplace file
-claude plugin validate plugins/guardrails # each plugin
+node --test plugins/guardrails/tests/guardrails.test.mjs   # 27 tests on real temporary git repositories
+claude plugin validate .                                    # the marketplace file
+claude plugin validate plugins/guardrails                   # each plugin
 ```
 
 ## Acknowledgements

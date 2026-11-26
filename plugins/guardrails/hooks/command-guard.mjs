@@ -12,16 +12,12 @@ try {
     command: payload.tool_input?.command,
     cwd,
     transcriptPath: payload.transcript_path,
+    shell: payload.tool_name === "PowerShell" ? "powershell" : "bash",
   });
   decide(verdict.decision, verdict.reason);
 } catch (error) {
   // A bug in the guard must not freeze every session, unless the project asked for strict.
-  let strict = false;
-  try {
-    strict = loadConfig(cwd).onGuardError === "deny";
-  } catch {
-    // An unreadable config cannot ask for strict mode.
-  }
+  const strict = loadConfig(cwd).onGuardError === "deny";
   process.stderr.write(`guardrails: the guard itself failed: ${error?.message ?? error}\n`);
   if (strict) decide("deny", `guardrails could not check this command (${error?.message ?? error}).`);
   process.exit(0);

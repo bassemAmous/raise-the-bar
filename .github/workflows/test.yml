@@ -22,4 +22,4 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Guard hook tests
-        run: node --test plugins/guardrails/tests/
+        run: node --test plugins/guardrails/tests/guardrails.test.mjs

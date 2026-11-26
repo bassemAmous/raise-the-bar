@@ -60,6 +60,7 @@ function status() {
     [
       `commit            ${head.slice(0, 8)}`,
       `config            ${config.file ?? "defaults (no guardrails.config.json)"}`,
+      ...(config.error ? [`config PROBLEM    ${config.error}`] : []),
       `protected         ${config.protectedBranches.join(", ")}`,
       `production        ${config.productionBranches.join(", ") || "(none)"}`,
       `test command      ${testCommand ?? "(none found: the test gate is off)"}`,
@@ -74,22 +75,34 @@ function status() {
 function runTests() {
   const root = needRepo();
   const config = loadConfig(cwd);
+  if (config.error) fail(`${config.file} has a problem: ${config.error}`);
   const testCommand = testCommandFor(config, root);
   if (!testCommand)
     fail(`no test command found. Set "tests": { "command": "..." } in ${CONFIG_FILE}`);
-  const dirty = tryGit(["status", "--porcelain", "--untracked-files=no"], root);
-  if (dirty)
-    fail(
-      "tracked files have changes that are not committed. A pass is recorded for a commit,\n" +
-        "so the tests must run on exactly what is committed. Commit (or stash) first.",
-    );
   const head = commitOf("HEAD", root);
+  if (!head) fail("this repository has no commit yet. Commit first: a pass is recorded for a commit.");
+  // A pass is recorded for a commit, so the files on disk must be exactly that commit.
+  // A new file that git does not know yet can make the tests pass here and fail for everyone else.
+  const changes = () =>
+    tryGit(["status", "--porcelain", config.tests.allowUntracked ? "--untracked-files=no" : "--untracked-files=normal"], root);
+  const dirty = changes();
+  if (dirty === null) fail("git could not report the state of the files. Nothing recorded.");
+  if (dirty) {
+    const rows = dirty.split("\n");
+    fail(
+      "the files here are not exactly what is committed:\n" +
+        rows.slice(0, 8).map((row) => `  ${row}`).join("\n") +
+        (rows.length > 8 ? `\n  ... and ${rows.length - 8} more` : "") +
+        "\nA pass is recorded for a commit, so the tests must run on exactly that commit.\n" +
+        "Commit, stash, or list files that are not part of the project in .gitignore.",
+    );
+  }
   process.stdout.write(`guardrails: running "${testCommand}" on ${head.slice(0, 8)}\n`);
   const started = Date.now();
   const run = spawnSync(testCommand, { cwd: root, stdio: "inherit", shell: true });
   const seconds = Math.round((Date.now() - started) / 1000);
   if (run.status !== 0) fail(`tests failed (exit ${run.status ?? "none"}) after ${seconds}s. Nothing recorded.`);
-  if (commitOf("HEAD", root) !== head || tryGit(["status", "--porcelain", "--untracked-files=no"], root))
+  if (commitOf("HEAD", root) !== head || tryGit(["status", "--porcelain", "--untracked-files=no"], root) !== "")
     fail("the code changed while the tests ran. Nothing recorded: run it again.");
   writeRecord(root, "tests", head, { head, command: testCommand, seconds });
   process.stdout.write(`guardrails: tests passed in ${seconds}s. Recorded for ${head.slice(0, 8)}.\n`);
@@ -99,7 +112,7 @@ function reviewStamp() {
   needRepo();
   const reportPath = option("report");
   if (!reportPath) fail("usage: guardrails review-stamp --report <file> [--head <ref>] [--reviewer <name>]");
-  if (!fs.existsSync(reportPath)) fail(`no report at ${reportPath}`);
+  if (!fs.existsSync(reportPath) || !fs.statSync(reportPath).isFile()) fail(`no report file at ${reportPath}`);
   const head = headOf();
   const report = fs.readFileSync(reportPath, "utf8");
   if (!report.includes(head.slice(0, 8)))
@@ -146,9 +159,14 @@ async function approve() {
 }
 
 function check() {
-  const text = rest.filter((word) => !word.startsWith("--")).join(" ");
+  // Everything after "check" is the command to judge. Only --transcript <file> is ours.
+  const words = [...rest];
+  const at = words.indexOf("--transcript");
+  const transcriptPath = at === -1 ? undefined : words[at + 1];
+  if (at !== -1) words.splice(at, 2);
+  const text = words.join(" ");
   if (!text) fail('usage: guardrails check "<shell command>"');
-  const verdict = judgeCommand({ command: text, cwd, transcriptPath: option("transcript") });
+  const verdict = judgeCommand({ command: text, cwd, transcriptPath });
   process.stdout.write(`${verdict.decision.toUpperCase()}\n${verdict.reason ? `${verdict.reason}\n` : ""}`);
   process.exit(verdict.decision === "allow" ? 0 : 2);
 }
@@ -158,7 +176,7 @@ function init() {
   const file = path.join(root, CONFIG_FILE);
   if (fs.existsSync(file)) fail(`${CONFIG_FILE} already exists`);
   const { onGuardError, ...defaults } = DEFAULTS;
-  const config = { ...defaults, tests: { required: true, command: detectTestCommand(root) }, onGuardError };
+  const config = { ...defaults, tests: { ...defaults.tests, command: detectTestCommand(root) }, onGuardError };
   fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   process.stdout.write(`guardrails: wrote ${file}\nEdit the branch lists and add your deploy commands under productionCommands.\n`);
 }

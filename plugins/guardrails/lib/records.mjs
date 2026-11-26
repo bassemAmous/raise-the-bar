@@ -38,11 +38,21 @@ export function writeRecord(cwd, kind, ref, data) {
   return record;
 }
 
-/** The three lines a review report must end with for it to count as passed. */
+/**
+ * The three lines a review report must END with for it to count as passed, in this order.
+ * Only the last three lines are read: a report that quotes the format higher up and then
+ * ends on FAIL is a fail.
+ */
 export function reviewTrailer(report) {
-  const verdict = report.match(/^\s*VERDICT:\s*(PASS|FAIL)\s*$/im)?.[1]?.toUpperCase();
-  const critical = report.match(/^\s*OPEN-CRITICAL:\s*(\d+)\s*$/im)?.[1];
-  const high = report.match(/^\s*OPEN-HIGH:\s*(\d+)\s*$/im)?.[1];
+  const last = String(report)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-3);
+  if (last.length < 3) return null;
+  const verdict = last[0].match(/^VERDICT:\s*(PASS|FAIL)$/i)?.[1]?.toUpperCase();
+  const critical = last[1].match(/^OPEN-CRITICAL:\s*(\d+)$/i)?.[1];
+  const high = last[2].match(/^OPEN-HIGH:\s*(\d+)$/i)?.[1];
   if (!verdict || critical === undefined || high === undefined) return null;
   return { verdict, openCritical: Number(critical), openHigh: Number(high) };
 }
