@@ -69,8 +69,8 @@ Not for a feature branch nobody deploys from: push those freely.
 7. **Production: stop for the human.** If the target is a production branch, you cannot finish
    alone. Say in plain words what will ship (the commit, the changed areas, anything that does
    not ship with the code, such as a new environment variable or a data change), and ask the
-   human to type the approval line the guard shows, alone on its line, for example
-   `approve production 3f2a9c1e`.
+   human to send the approval line the guard shows as a message of its own, with nothing else
+   in it, for example `approve production 3f2a9c1e`.
    Do not look for another way. The approval is the one step that is not yours.
 
 8. **Push.** Send the same push again, as its own command: not chained after a commit, a merge

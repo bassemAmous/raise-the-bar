@@ -6,8 +6,9 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { CONFIG_FILE, DEFAULTS, commitOf, loadConfig, repoRoot, stateDir, tryGit } from "./lib/core.mjs";
-import { detectTestCommand, judgeCommand, testCommandFor } from "./lib/judge.mjs";
+import { judgeCommand } from "./lib/judge.mjs";
 import { readRecord, reviewTrailer, writeRecord } from "./lib/records.mjs";
+import { detectTestCommand, testCommandFor } from "./lib/testcommand.mjs";
 
 const USAGE = `guardrails <command>
 

@@ -68,6 +68,15 @@ export function tryGit(args, cwd) {
   }
 }
 
+/** A file's content out of git, as bytes (it may not be text). null when git cannot give it. */
+export function gitBytes(args, cwd) {
+  try {
+    return execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "ignore"], timeout: 15000, maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return null;
+  }
+}
+
 export const slash = (p) => String(p).split("\\").join("/");
 
 export function repoRoot(cwd) {
@@ -147,6 +156,26 @@ export function loadConfig(cwd) {
   if (!(Number(config.approval.maxAgeMinutes) > 0)) {
     problems.push('"approval.maxAgeMinutes" must be a number above 0');
     config.approval.maxAgeMinutes = DEFAULTS.approval.maxAgeMinutes;
+  }
+  // A switch written as "false" (a string) is true to JavaScript. It must not flip a check by accident.
+  for (const [section, key] of [
+    ["tests", "required"],
+    ["tests", "allowUntracked"],
+    ["review", "required"],
+    ["secretScan", "enabled"],
+    ["dangerGuard", "enabled"],
+  ]) {
+    if (typeof config[section][key] === "boolean") continue;
+    problems.push(`"${section}.${key}" must be true or false`);
+    config[section][key] = DEFAULTS[section][key];
+  }
+  if (config.tests.command !== null && (typeof config.tests.command !== "string" || !config.tests.command.trim())) {
+    problems.push('"tests.command" must be a command as text, or null');
+    config.tests.command = null;
+  }
+  if (config.onGuardError !== "allow" && config.onGuardError !== "deny") {
+    problems.push('"onGuardError" must be "allow" or "deny"');
+    config.onGuardError = DEFAULTS.onGuardError;
   }
   config.file = file ? slash(file) : null;
   config.error = problems.length ? problems.join("; ") : null;

@@ -1,9 +1,11 @@
 // Commands that destroy work or data in one line. Each rule is narrow on purpose: it names one
 // catastrophe, so normal work is never refused. The rules read the programs a line runs, not
 // its raw text, so a commit message or a search that only mentions a dangerous command passes.
+import fs from "node:fs";
 import os from "node:os";
-import { slash } from "./core.mjs";
-import { callsIn, gitCall, readCommit } from "./shell.mjs";
+import path from "node:path";
+import { repoRoot, slash } from "./core.mjs";
+import { gitCall, readCommit, resolveFolder } from "./shell.mjs";
 
 const DELETERS = new Set(["rm", "rmdir", "rd", "del", "erase", "remove-item", "ri"]);
 const SYSTEM_FOLDERS = new Set([
@@ -12,27 +14,68 @@ const SYSTEM_FOLDERS = new Set([
 ]);
 
 function isRecursive(arg) {
-  const flag = arg.toLowerCase();
+  const flag = arg.toLowerCase().replace(/:\$?true$/, ""); // PowerShell's -Recurse:$true
   if (flag === "--recursive" || flag === "/s") return true;
   if (/^-r(?:e(?:c(?:u(?:r(?:se?)?)?)?)?)?$/.test(flag)) return true; // -r, and PowerShell's -Recurse
   return /^-[a-z]{1,3}$/.test(flag) && flag.includes("r") && !flag.startsWith("-fo");
 }
 
+const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+const isBigPlace = (place) =>
+  place === "/" || /^[a-z]:\/?$/i.test(place) || same(place, slash(os.homedir())) || SYSTEM_FOLDERS.has(place.toLowerCase());
+
+/**
+ * True when the target is the git folder of a repository whose history would be lost: the
+ * repository the command runs in, or one outside it. A .git nested below (a fresh clone, a
+ * vendored template) is the caller's to remove.
+ */
+function isHistory(target, folder) {
+  const wanted = slash(target).replace(/\/+$/, "");
+  if (!/(?:^|\/)\.git$/i.test(wanted)) return false;
+  const full = resolveFolder(folder, wanted);
+  if (!full) return true; // a variable, or a folder this reader could not follow: not a risk to take
+  if (!fs.existsSync(full)) return false;
+  const root = folder && fs.existsSync(folder) ? repoRoot(folder) : null;
+  if (!root) return true;
+  const owner = slash(path.dirname(full));
+  return !owner.toLowerCase().startsWith(`${root.toLowerCase()}/`);
+}
+
+/** The top of the repository a folder is in, or null. */
+const repoAt = (folder) => (folder && fs.existsSync(folder) ? repoRoot(folder) : null);
+
 /** True for a path whose deletion takes the disk, the home folder, a system folder or the git history. */
-function isCatastrophic(target) {
+function isCatastrophic(target, call, takesHidden) {
   let wanted = slash(target).replace(/^(?:\$\{?HOME\}?|\$env:(?:USERPROFILE|HOME)|%USERPROFILE%)/i, "~");
+  if (/^(?:\$\(pwd\)|\$\{?PWD\}?)$/.test(wanted)) wanted = ".";
+  // "everything here": . and ./, then *, ./*, and the hidden files: .*
+  const itself = /^\.\/?$/.test(wanted);
+  const here = itself || /^(?:\.\/)?\*$/.test(wanted);
+  const hidden = /^(?:\.\/)?\.\*$/.test(wanted);
   wanted = wanted.replace(/\/\*$/, "").replace(/\/+$/, "") || "/";
-  if (wanted === "/" || wanted === "~" || /^[a-z]:$/i.test(wanted)) return true;
+  if (here || hidden) {
+    if (!call.folder) return false;
+    if (isBigPlace(call.folder)) return true;
+    // Hidden files go with .* and with PowerShell's -Force: at the top of a repository, .git goes too.
+    return (hidden || takesHidden || itself) && same(repoAt(call.folder) ?? "", call.folder);
+  }
+  if (wanted === "~" || isBigPlace(wanted)) return true;
   if (process.platform === "win32" && /^\/[a-z]$/i.test(wanted)) return true; // Git Bash drive root
-  if (wanted === ".git" || wanted.endsWith("/.git")) return true;
-  if (wanted.toLowerCase() === slash(os.homedir()).toLowerCase()) return true;
-  return SYSTEM_FOLDERS.has(wanted.toLowerCase());
+  if (isHistory(wanted, call.folder)) return true;
+  // The same place written another way: /c/Users/me, ../.., ~/..
+  const full = resolveFolder(call.folder, wanted);
+  if (full === null) return false;
+  if (isBigPlace(full)) return true;
+  // The repository the command runs in, or a folder above it: the history goes with it.
+  const root = repoAt(call.folder);
+  return root !== null && `${root.toLowerCase()}/`.startsWith(`${full.toLowerCase()}/`);
 }
 
 function deletesEverything(call) {
   if (!DELETERS.has(call.program)) return false;
   if (!call.args.some(isRecursive)) return false;
-  return call.args.some((arg) => !arg.startsWith("-") && !/^\/[sq]$/i.test(arg) && isCatastrophic(arg));
+  const takesHidden = call.args.some((arg) => /^-fo(?:r(?:ce?)?)?$/i.test(arg));
+  return call.args.some((arg) => !arg.startsWith("-") && !/^\/[sq]$/i.test(arg) && isCatastrophic(arg, call, takesHidden));
 }
 
 function skipsHooks(git) {
@@ -42,20 +85,21 @@ function skipsHooks(git) {
 }
 
 // Programs whose arguments are a message or a search pattern: text about a command, not a command.
-const MESSAGE_PROGRAMS = new Set(["git", "gh", "grep", "egrep", "fgrep", "rg", "ag", "findstr", "select-string", "sls", "man"]);
+const TAKES_PROSE = new Set(["git", "gh", "grep", "egrep", "fgrep", "rg", "ag", "findstr", "select-string", "sls", "man"]);
 // These only print. What they print matters when it is piped into another program.
 const PRINTERS = new Set(["echo", "printf", "cat", "type", "write-host", "write-output"]);
 
 /** The text a call hands to a program that could run it as a query. */
 function queryText(call) {
-  if (MESSAGE_PROGRAMS.has(call.program)) return [];
+  if (TAKES_PROSE.has(call.program)) return [];
   if (PRINTERS.has(call.program) && !call.pipe) return [];
   return [...call.args, ...call.heredocs];
 }
 
 const DROPS = [/\bdrop\s+(?:database|schema)\b/i, /\bdropDatabase\s*\(/];
 const WIPES = [
-  /\bdelete\s+from\s+[\w."`[\]]+\s*(?:;|$)/im,
+  // DELETE FROM a table with nothing after it. A WHERE on the next line is a filter like any other.
+  /\bdelete\s+from\s+[\w."`[\]]+\s*(?:;|$)/i,
   /\bdelete\s+from\s+[\w."`[\]]+\s+where\s+(?:1\s*=\s*1|true)\b/i,
   /\btruncate\s+table\s+[\w."`[\]]+/i,
   /\b(?:deleteMany|updateMany|remove)\s*\(\s*\{\s*\}\s*[,)]/,
@@ -94,8 +138,8 @@ export const DANGER_RULES = [
   { id: "wipe-history", test: wipesHistory, why: "This rewrites or erases git history." },
 ];
 
-/** The first rule a command line breaks, or null. `calls` can be passed when already read. */
-export function dangerIn(command, calls = callsIn(command, null)) {
+/** The first rule broken by the calls of a command line (see readLine in shell.mjs), or null. */
+export function dangerIn(calls) {
   for (const call of calls) {
     const git = gitCall(call);
     const rule = DANGER_RULES.find((candidate) => candidate.test(call, git));

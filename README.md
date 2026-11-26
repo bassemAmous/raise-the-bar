@@ -100,7 +100,8 @@ config file with no project-specific rules.
   out to defeat them on a machine it controls can find a way. Keep the server-side protections:
   branch protection, required reviews, deploy permissions.
 - The hook judges a command before it runs. So a push to a protected branch has to be sent as
-  its own command, not chained after the commit that creates the code. The guard says so.
+  its own command, not chained after the commit that creates the code, and a commit is not
+  chained after a step that writes files. The guard says so, and says what to send instead.
 - A test pass is recorded by the tool that ran the tests. A review pass is recorded from a report
   the agent hands in. The first is hard to fake; the second is kept for a person to read.
 - The secret scan knows common key formats. It is not a replacement for a full scanner in CI.
@@ -109,7 +110,7 @@ config file with no project-specific rules.
 ## Development
 
 ```
-node --test plugins/guardrails/tests/guardrails.test.mjs   # 27 tests on real temporary git repositories
+node --test plugins/guardrails/tests/guardrails.test.mjs   # 32 tests on real temporary git repositories
 claude plugin validate .                                    # the marketplace file
 claude plugin validate plugins/guardrails                   # each plugin
 ```

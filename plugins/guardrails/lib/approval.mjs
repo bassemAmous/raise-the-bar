@@ -5,16 +5,35 @@
 import fs from "node:fs";
 import { readRecord } from "./records.mjs";
 
-const TAIL_BYTES = 4 * 1024 * 1024;
+const CHUNK_BYTES = 1024 * 1024;
+const MAX_BYTES = 256 * 1024 * 1024;
 
-function tailOf(file) {
-  const size = fs.statSync(file).size;
-  const start = Math.max(0, size - TAIL_BYTES);
+/**
+ * The rows of a session log, newest first. The file is read from its end, a piece at a time,
+ * so the caller can stop as soon as the rows are older than it cares about.
+ */
+function* rowsNewestFirst(file) {
   const fd = fs.openSync(file, "r");
   try {
-    const buffer = Buffer.alloc(size - start);
-    fs.readSync(fd, buffer, 0, buffer.length, start);
-    return buffer.toString("utf8");
+    let end = fs.fstatSync(fd).size;
+    let rest = Buffer.alloc(0); // the tail of a row whose start is in an earlier piece
+    for (let read = 0; end > 0 && read < MAX_BYTES; ) {
+      const start = Math.max(0, end - CHUNK_BYTES);
+      const piece = Buffer.alloc(end - start);
+      fs.readSync(fd, piece, 0, piece.length, start);
+      read += piece.length;
+      end = start;
+      const block = Buffer.concat([piece, rest]);
+      // Before the first line break is the end of a row that starts earlier: keep it for the next piece.
+      const cut = start === 0 ? -1 : block.indexOf(10);
+      if (start > 0 && cut === -1) {
+        rest = block;
+        continue;
+      }
+      rest = block.subarray(0, Math.max(cut, 0));
+      const rows = block.subarray(cut + 1).toString("utf8").split("\n");
+      for (let i = rows.length - 1; i >= 0; i--) yield rows[i];
+    }
   } finally {
     fs.closeSync(fd);
   }
@@ -49,12 +68,12 @@ export function isTypedByHuman(row) {
   // Older logs carry no origin. Plain typed text counts; slash commands and command output
   // (which a hook or a program can write) do not.
   const content = row.message?.content;
-  return typeof content === "string" && !row.rowSource && !content.trimStart().startsWith("<");
+  if (row.rowSource || row.toolUseResult !== undefined) return false;
+  return typeof content === "string" && !content.trimStart().startsWith("<");
 }
 
 function textOf(row) {
-  if (row.type === "attachment") return typeof row.attachment.prompt === "string" ? row.attachment.prompt : "";
-  const content = row.message?.content;
+  const content = row.type === "attachment" ? row.attachment.prompt : row.message?.content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   if (content.some((block) => block?.type === "tool_result")) return "";
@@ -64,46 +83,56 @@ function textOf(row) {
     .join("\n");
 }
 
-/** Lines a person typed in this session, newest last: [{ text, at }]. */
-export function typedLines(transcriptPath) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) return [];
-  const lines = [];
-  for (const raw of tailOf(transcriptPath).split("\n")) {
-    if (!raw.includes('"user"') && !raw.includes('"queued_command"')) continue;
-    let row;
-    try {
-      row = JSON.parse(raw);
-    } catch {
-      continue; // a cut first line, or a row still being written
+/**
+ * The messages a person typed in this session, newest first: [{ text, at }].
+ * `since` (a time in ms) stops the read at the first row older than it.
+ */
+export function typedMessages(transcriptPath, since = 0) {
+  const messages = [];
+  try {
+    if (!transcriptPath || !fs.statSync(transcriptPath).isFile()) return messages;
+    for (const raw of rowsNewestFirst(transcriptPath)) {
+      if (!raw.includes('"user"') && !raw.includes('"queued_command"')) continue;
+      let row;
+      try {
+        row = JSON.parse(raw);
+      } catch {
+        continue; // a row still being written
+      }
+      const at = Date.parse(row.timestamp ?? row.attachment?.timestamp ?? "") || null;
+      if (at !== null && at < since) break;
+      if (!isTypedByHuman(row)) continue;
+      const text = textOf(row);
+      if (text) messages.push({ text, at });
     }
-    if (!isTypedByHuman(row)) continue;
-    const text = textOf(row);
-    if (text) lines.push({ text, at: Date.parse(row.timestamp ?? row.attachment?.timestamp ?? "") || null });
+  } catch {
+    // A log that is missing, is a folder or cannot be read holds no approval.
   }
-  return lines;
+  return messages;
 }
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * Did a person approve this commit?
- * The typed line is the phrase followed by at least the first 7 characters of the commit id,
+ * The typed message is the phrase followed by at least the first 7 characters of the commit id,
  * for example: approve production 3f2a9c1
- * It must stand alone on its line. "do not approve production 3f2a9c1 yet" approves nothing.
- * Outside a git repository there is no commit to name: the line is the phrase and the word
+ * It must be the whole message. "do not approve production 3f2a9c1 yet" approves nothing, and
+ * neither does a longer message that carries the line somewhere inside it (a pasted block).
+ * Outside a git repository there is no commit to name: the message is the phrase and the word
  * "now", and it only counts for 10 minutes.
  */
 export function typedApproval({ transcriptPath, phrase, head, maxAgeMinutes, now = Date.now() }) {
   const words = escapeRegExp(phrase.trim()).replace(/\s+/g, "\\s+");
-  const pattern = new RegExp(`^[ \\t]*${words}[ \\t]+(${head ? "[0-9a-f]{7,40}" : "now"})[ \\t]*[.!]?[ \\t]*\\r?$`, "im");
+  const pattern = new RegExp(`^\\s*${words}\\s+(${head ? "[0-9a-f]{7,40}" : "now"})\\s*[.!]?\\s*$`, "i");
   const maxAge = (head ? maxAgeMinutes : Math.min(maxAgeMinutes, 10)) * 60000;
-  for (const line of typedLines(transcriptPath).reverse()) {
-    const match = line.text.match(pattern);
+  for (const message of typedMessages(transcriptPath, now - maxAge - 60000)) {
+    const match = message.text.match(pattern);
     if (!match) continue;
     if (head && !head.startsWith(match[1].toLowerCase())) continue;
     // No time, too old, or dated in the future (a clock or a forged row): not counted.
-    if (line.at === null || now - line.at > maxAge || line.at - now > 60000) continue;
-    return { via: "chat", at: new Date(line.at).toISOString() };
+    if (message.at === null || now - message.at > maxAge || message.at - now > 60000) continue;
+    return { via: "chat", at: new Date(message.at).toISOString() };
   }
   return null;
 }

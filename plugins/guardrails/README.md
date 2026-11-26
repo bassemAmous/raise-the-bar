@@ -28,7 +28,7 @@ Do these in order, from ~/shop:
      and the pass is recorded with:  guardrails review-stamp --report <file>
      Test before you review: a fix after the review means a second review.
   3. Production is locked until a human approves this commit. You cannot do this step.
-     Stop, say what will ship, and ask the human to type this line in the chat, alone on its line:
+     Stop, say what will ship, and ask the human to send this line as a message of its own:
        approve production 75e9538d
 Then send this exact push again, as its own command.
 ```
@@ -50,6 +50,9 @@ that step alone:
 | `git commit -am "wip" && git push origin HEAD:feature/x` | Allowed. Feature branches are free. |
 | `git add . && git commit -m "x"` | The files are scanned as they are on disk now, including new ones. |
 | `echo "KEY=..." > .env && git add . && git commit -m "x"` | Refused. The file does not exist yet, so it cannot be read. Commit as its own command. |
+| `npm run build && git add -A && git commit -m "x"` | Refused, for the same reason: the guard cannot know what the build writes. Run the build, then add and commit. |
+| `npm test && git commit -m "x"` | Allowed. This commit takes only what is already staged, and that was scanned. |
+| `git pom` (an alias for `push origin main`), `try { git push origin main } catch {}`, `echo "git push origin main" \| bash` | Read as the push it is. |
 | `cd "$SOMEWHERE" && git push origin main` | Refused. The guard cannot tell which repository this is. Write the folder. |
 | `bash -c "git push origin main"`, `(git push origin main)`, `git push origin main > log 2>&1` | Read as the push it is. |
 | `echo "then git push origin main"`, a commit message or a `gh pr create --body` that mentions a push | Text, not a command. Allowed. |
@@ -80,11 +83,13 @@ that step alone:
 
 Two ways, both need a person:
 
-1. **In the chat.** Type `approve production <first 7 or more characters of the commit id>`,
-   alone on its line. "Do not approve production 75e9538d yet" approves nothing. The hook reads
-   the session log and counts only lines a person typed: not the agent's own text, not tool
-   output, not messages from other agents, not a summary of an older conversation. The approval
-   is for that one commit and expires after `maxAgeMinutes` (60 by default).
+1. **In the chat.** Send `approve production <first 7 or more characters of the commit id>` as
+   a message of its own: those words and nothing else. A sentence that holds the line ("do not
+   approve production 75e9538d yet"), or a paste of the guard's own message, approves nothing.
+   The hook reads the session log and counts only messages a person typed: not the agent's own
+   text, not tool output, not messages from other agents, not a summary of an older
+   conversation. The approval is for that one commit and expires after `maxAgeMinutes` (60 by
+   default).
 2. **In your own terminal.** Run `guardrails approve`. It needs a real terminal and asks you to
    type the commit id. An agent's shell is not a terminal, so the command refuses there.
 
@@ -132,7 +137,9 @@ use `node <plugin folder>/cli.mjs`.
 | `onGuardError` | `allow` | What to do if the guard itself crashes: `allow` or `deny` |
 
 For one line that looks like a secret and is not, add the comment `guardrails:allow-secret` on
-that line.
+that line. The agent can write that comment too, so it does not pass alone: the commit then
+asks you to confirm, with the file and the line. Paths under `secretScan.allowPaths` are skipped
+with no question, and changing the config file asks you first.
 
 **A config file with a mistake closes the guard, it does not open it.** If the file is not valid
 JSON, or a key has the wrong type, commits and pushes are refused with the reason until the file
@@ -162,13 +169,23 @@ is fixed, and `guardrails status` shows the problem.
 - **One approval is a window, not a single use.** Until it expires, it covers every push of that
   commit and every command in `productionCommands`. Set `maxAgeMinutes` low if that is too wide.
 - The guard reads commands for Bash and PowerShell. A push made by another program (an IDE
-  button, a script the agent wrote and ran) is not seen.
+  button, a script the agent wrote and ran, `xargs`, `gh pr merge`) is not seen.
 - A push whose target is a shell variable cannot be read, so it is refused. Write the branch name.
+- Only `git push` is read as a push. `git send-pack` and `git subtree push` are not, and a
+  remote-tracking ref moved by hand (`git update-ref`) can make a commit look already pushed.
+- A line is judged before it runs. A commit that takes files from disk after a step that can
+  write files is refused, even when that step is harmless: send it in two parts. A line that
+  nests commands deeper than 12 levels, or holds more than 20 commits and pushes, is refused too.
+- Commits that git makes for you are not scanned: the end of a merge, a rebase or a cherry-pick
+  (`--continue`). The push check still applies to them.
+- The destructive-command guard names a few catastrophes: the disk, the home folder, a system
+  folder, the repository you are in, a dropped database, a delete with no filter. It does not
+  follow `find -delete`, `git clean`, a delete piped from a listing, or a path held in a variable.
 - The typed approval is read from the session log. The reader is tested against the row shapes
   of the terminal app and the VS Code extension. If another client writes a shape it does not
   know, the typed line is not counted: use `guardrails approve` in your terminal.
 - The secret scan knows common key formats and high-entropy strings next to words like
-  `password`. It does not replace a scanner in CI.
+  `password`. Short or word-like passwords pass. It does not replace a scanner in CI.
 
 ## Tests
 
@@ -176,7 +193,10 @@ is fixed, and `guardrails status` shows the problem.
 node --test plugins/guardrails/tests/guardrails.test.mjs
 ```
 
-27 tests. Each one builds a real temporary git repository with a real remote and runs the guard
+32 tests. Each one builds a real temporary git repository with a real remote and runs the guard
 against it: the full path to production, the refusals, the forged approvals, the secret scan,
 and the command shapes that must and must not be read as a push. They run on Linux, macOS and
 Windows, on Node 20 and 22.
+
+The guard was reviewed twice by an independent agent that was asked to break it. Every bypass it
+found is either closed and covered by a test, or listed under Limits.

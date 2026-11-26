@@ -7,7 +7,9 @@ import { repoRoot, slash } from "./core.mjs";
 
 // In Bash a backslash escapes these. Before anything else it stays a backslash, so C:\Users\me survives.
 const ESCAPABLE = new Set([" ", "\t", '"', "'", "\\", "$", "`", ";", "&", "|", "(", ")", "<", ">", "*", "#"]);
-const MAX_DEPTH = 6;
+// Commands inside commands ( $(...), bash -c "...", brackets ) are followed this deep. Past
+// that the line is marked unreadable, and the caller refuses it instead of guessing.
+const MAX_DEPTH = 12;
 
 const newSegment = () => ({ words: [], redirects: [], nested: [], heredocs: [], pipe: false });
 
@@ -19,7 +21,7 @@ const newSegment = () => ({ words: [], redirects: [], nested: [], heredocs: [], 
  * Quotes are respected, so words inside a message are never taken for a command, and heredoc
  * bodies are kept as data on the command that reads them.
  */
-function parse(text, start, closer, depth, ps) {
+function parse(text, start, closer, depth, ps, notes) {
   const size = text.length;
   const items = [];
   const pending = []; // heredocs waiting for their body
@@ -47,11 +49,26 @@ function parse(text, start, closer, depth, ps) {
     }
     segment = newSegment();
   };
+  // Reads a part that is a command line of its own. Too deep: nothing is read, and the note says so.
+  const dive = (source, from, close) => {
+    if (depth >= MAX_DEPTH) {
+      notes.unreadable = true;
+      return { items: [], end: source.length };
+    }
+    return parse(source, from, close, depth + 1, ps, notes);
+  };
   // text[from] is the first character after "$(" . Returns the index after the closing ")".
   const substitution = (from) => {
-    const inner = parse(text, from, ")", depth + 1, ps);
-    if (depth < MAX_DEPTH) segment.nested.push(inner.items);
+    const inner = dive(text, from, ")");
+    segment.nested.push(inner.items);
     return inner.end;
+  };
+  // text[from] is a backtick that opens a command. Returns the index after the closing one, or -1.
+  const backticks = (from) => {
+    const close = text.indexOf("`", from + 1);
+    if (close === -1) return -1;
+    segment.nested.push(dive(text.slice(from + 1, close), 0, null).items);
+    return close + 1;
   };
 
   while (i < size) {
@@ -92,15 +109,9 @@ function parse(text, start, closer, depth, ps) {
           inside += text.slice(j, end);
           j = end;
         } else if (!ps && c === "`") {
-          const close = text.indexOf("`", j + 1);
-          if (close === -1) {
-            inside += c;
-            j++;
-          } else {
-            if (depth < MAX_DEPTH) segment.nested.push(parse(text.slice(j + 1, close), 0, null, depth + 1, ps).items);
-            inside += text.slice(j, close + 1);
-            j = close + 1;
-          }
+          const end = backticks(j);
+          inside += end === -1 ? c : text.slice(j, end);
+          j = end === -1 ? j + 1 : end;
         } else {
           inside += c;
           j++;
@@ -134,15 +145,9 @@ function parse(text, start, closer, depth, ps) {
     }
 
     if (ch === "`") {
-      const close = text.indexOf("`", i + 1);
-      if (close === -1) {
-        add(ch);
-        i++;
-      } else {
-        if (depth < MAX_DEPTH) segment.nested.push(parse(text.slice(i + 1, close), 0, null, depth + 1, ps).items);
-        add(text.slice(i, close + 1));
-        i = close + 1;
-      }
+      const end = backticks(i);
+      add(end === -1 ? ch : text.slice(i, end));
+      i = end === -1 ? i + 1 : end;
       continue;
     }
 
@@ -194,8 +199,8 @@ function parse(text, start, closer, depth, ps) {
 
     if (ch === "(") {
       endSegment();
-      const inner = parse(text, i + 1, ")", depth + 1, ps);
-      if (depth < MAX_DEPTH) items.push({ group: inner.items });
+      const inner = dive(text, i + 1, ")");
+      items.push({ group: inner.items });
       i = inner.end;
       continue;
     }
@@ -257,6 +262,21 @@ function parse(text, start, closer, depth, ps) {
       continue;
     }
 
+    if (ps && (ch === "{" || ch === "}")) {
+      // ${name} is a variable. Any other brace opens or closes a script block, where a new
+      // command starts: if ($ok) {git push} runs git, with or without spaces.
+      if (ch === "{" && text[i - 1] === "$") {
+        const close = text.indexOf("}", i);
+        const stop = close === -1 ? size : close + 1;
+        add(text.slice(i, stop));
+        i = stop;
+      } else {
+        endSegment();
+        i++;
+      }
+      continue;
+    }
+
     add(ch);
     i++;
   }
@@ -299,7 +319,9 @@ export const TEXT_PROGRAMS = new Set([
   "type", "ls", "dir", "gh", "findstr", "select-string", "sls", "write-host", "write-output",
 ]);
 
-const KEYWORDS = new Set(["{", "}", "!", "then", "do", "else", "elif", "if", "while", "until", "fi", "done"]);
+const KEYWORDS = new Set([
+  "{", "}", "!", "then", "do", "else", "elif", "elseif", "if", "while", "until", "fi", "done", "try", "catch", "finally",
+]);
 const PREFIXES = new Set([
   "sudo", "doas", "command", "builtin", "time", "nohup", "exec", "env", "call", "winpty", "nice", "xargs", "wsl",
   "start", "stdbuf",
@@ -310,15 +332,46 @@ const CD = new Set(["cd", "chdir", "set-location", "sl"]);
 const PUSHD = new Set(["pushd", "push-location"]);
 const POPD = new Set(["popd", "pop-location"]);
 const MOVES_GIT = /^(?:GIT_DIR|GIT_WORK_TREE)=/;
+const PRINTS_ITS_WORDS = new Set(["echo", "printf", "write-output", "write-host"]);
+const START_PROCESS_FLAG_WITH_VALUE = /^-(?:verb|windowstyle|credential|redirectstandard(?:input|output|error))$/i;
 
-function walk(items, state, calls, depth) {
+/** The text a command pipes into the next one, when that text is written on the line itself. */
+function textPipedBy(item) {
+  if (!item) return [];
+  const program = programOf(item.words[0] ?? "");
+  // printf and `echo -e` turn \n into a line break: read it that way, so a second line is seen.
+  if (PRINTS_ITS_WORDS.has(program)) return [item.words.slice(1).join(" ").replace(/\\[nr]/g, "\n")];
+  if (program === "cat") return item.heredocs;
+  // PowerShell: a quoted text alone before the pipe is sent down the pipe as it is.
+  return item.words.length === 1 && /\s/.test(item.words[0]) ? [item.words[0]] : [];
+}
+
+/** PowerShell's Start-Process git -ArgumentList "push","origin","main": the words of what it starts. */
+function startProcess(args) {
+  const named = [];
+  let folder;
+  for (let i = 0; i < args.length; i++) {
+    if (/^-workingdirectory$/i.test(args[i])) folder = args[++i];
+    else if (START_PROCESS_FLAG_WITH_VALUE.test(args[i])) i++;
+    else if (!args[i].startsWith("-")) named.push(args[i]);
+  }
+  if (named.length === 0) return null;
+  const rest = named.slice(1).join(" ").split(/[\s,]+/).filter(Boolean);
+  return { words: [named[0], ...rest], folder };
+}
+
+function walk(items, state, calls, depth, notes) {
+  let feeder = null; // the command whose output is piped into the one being read
   for (const item of items) {
     // A parenthesised part keeps its `cd` to itself.
     if (item.group) {
-      walk(item.group, { ...state, stack: [...state.stack] }, calls, depth);
+      feeder = null;
+      walk(item.group, { ...state, stack: [...state.stack] }, calls, depth, notes);
       continue;
     }
-    for (const nested of item.nested) walk(nested, { ...state, stack: [...state.stack] }, calls, depth);
+    const fedBy = feeder;
+    feeder = item.pipe ? item : null;
+    for (const nested of item.nested) walk(nested, { ...state, stack: [...state.stack] }, calls, depth, notes);
 
     const words = [...item.words];
     let lost = state.lost; // true: git was pointed somewhere this reader cannot follow
@@ -360,28 +413,49 @@ function walk(items, state, calls, depth) {
       continue;
     }
 
-    if (depth < MAX_DEPTH) {
-      let inner = null;
-      let innerPs = false;
-      if (SHELLS.has(program)) {
-        const at = args.findIndex((arg) => /^-[a-zA-Z]*c$/.test(arg));
-        if (at !== -1 && args[at + 1] !== undefined) inner = args[at + 1];
-      } else if (POWERSHELLS.has(program)) {
-        innerPs = true;
-        const encoded = args.findIndex((arg) => /^-e(?:c|nc|ncodedcommand)?$/i.test(arg));
-        const at = args.findIndex((arg) => /^-c(?:ommand)?$/i.test(arg));
-        if (encoded !== -1 && args[encoded + 1]) inner = Buffer.from(args[encoded + 1], "base64").toString("utf16le");
-        else if (at !== -1) inner = args.slice(at + 1).join(" ");
-        else if (!args.some((arg) => /^-f(?:ile)?$/i.test(arg))) inner = args.filter((arg) => !arg.startsWith("-")).join(" ");
-      } else if (program === "cmd") {
-        const at = args.findIndex((arg) => /^\/[ck]$/i.test(arg));
-        if (at !== -1) inner = args.slice(at + 1).join(" ");
-      } else if (program === "eval" || program === "invoke-expression" || program === "iex") inner = args.join(" ");
-      if (inner !== null) {
-        const text = innerPs ? inner : inner.replace(/\\\r?\n/g, "");
-        walk(parse(text, 0, null, depth + 1, innerPs).items, { ...state, lost, stack: [...state.stack] }, calls, depth + 1);
+    if (program === "start-process" || program === "saps") {
+      const started = startProcess(args);
+      if (started) {
+        const folder = started.folder === undefined ? state.folder : resolveFolder(state.folder, started.folder);
+        const launched = { ...item, words: started.words, nested: [] };
+        walk([launched], { ...state, folder, lost, stack: [...state.stack] }, calls, depth, notes);
         continue;
       }
+    }
+
+    // A command handed to another shell is read as the command line it is.
+    let inner = null;
+    let innerPs = false;
+    // With no script file and no -c, a shell runs what it is fed: a heredoc, or text piped into it.
+    const fed = () => {
+      const texts = [...item.heredocs, ...textPipedBy(fedBy)];
+      return texts.length ? texts.join("\n") : null;
+    };
+    if (SHELLS.has(program)) {
+      const at = args.findIndex((arg) => /^-[a-zA-Z]*c$/.test(arg));
+      if (at !== -1 && args[at + 1] !== undefined) inner = args[at + 1];
+      else if (program !== "script" && args.every((arg) => arg.startsWith("-"))) inner = fed();
+    } else if (POWERSHELLS.has(program)) {
+      innerPs = true;
+      const encoded = args.findIndex((arg) => /^-e(?:c|nc|ncodedcommand)?$/i.test(arg));
+      const at = args.findIndex((arg) => /^-c(?:ommand)?$/i.test(arg));
+      if (encoded !== -1 && args[encoded + 1]) inner = Buffer.from(args[encoded + 1], "base64").toString("utf16le");
+      else if (at !== -1 && args[at + 1] !== "-") inner = args.slice(at + 1).join(" ");
+      else if (args.every((arg) => arg.startsWith("-"))) inner = fed();
+      else if (!args.some((arg) => /^-f(?:ile)?$/i.test(arg))) inner = args.filter((arg) => !arg.startsWith("-")).join(" ");
+    } else if (program === "cmd") {
+      innerPs = true; // cmd has no backslash escapes either: C:\* must stay C:\*
+      const at = args.findIndex((arg) => /^\/[ck]$/i.test(arg));
+      if (at !== -1) inner = args.slice(at + 1).join(" ");
+    } else if (program === "eval" || program === "invoke-expression" || program === "iex") inner = args.join(" ");
+    if (inner !== null) {
+      if (depth >= MAX_DEPTH) notes.unreadable = true;
+      else {
+        const text = innerPs ? inner : inner.replace(/\\\r?\n/g, "");
+        const items = parse(text, 0, null, depth + 1, innerPs, notes).items;
+        walk(items, { ...state, lost, stack: [...state.stack] }, calls, depth + 1, notes);
+      }
+      continue;
     }
 
     const folder = lost ? null : state.folder;
@@ -397,20 +471,26 @@ function walk(items, state, calls, depth) {
 
 /**
  * Every program a command line runs, in order:
- * [{ program, word0, args, redirects, heredocs, pipe, folder }].
+ * { calls: [{ program, word0, args, redirects, heredocs, pipe, folder }], unreadable }.
  * `folder` is where it runs, following cd, or null when that cannot be known. `cd` itself is
  * listed with program "cd". Commands handed to another shell (bash -c "...",
  * powershell -Command "...") and command substitutions are read too.
+ * `unreadable` is true when the line nests commands deeper than this reader follows.
  * options.shell: "powershell" reads the line with PowerShell's quoting rules.
  */
-export function callsIn(command, cwd, options = {}) {
+export function readLine(command, cwd, options = {}) {
   const ps = options.shell === "powershell";
   const raw = String(command ?? "");
   const text = ps ? raw : raw.replace(/\\\r?\n/g, "");
   const calls = [];
-  walk(parse(text, 0, null, 0, ps).items, { folder: cwd ? slash(cwd) : null, stack: [], lost: false }, calls, 0);
-  return calls;
+  const notes = { unreadable: false };
+  const items = parse(text, 0, null, 0, ps, notes).items;
+  walk(items, { folder: cwd ? slash(cwd) : null, stack: [], lost: false }, calls, 0, notes);
+  return { calls, unreadable: notes.unreadable };
 }
+
+/** The calls of a command line. See readLine. */
+export const callsIn = (command, cwd, options) => readLine(command, cwd, options).calls;
 
 /** A call to git, past its global options: { folder, verb, args, globals, call } or null. */
 export function gitCall(call) {
@@ -463,6 +543,7 @@ export function readCommit(args) {
           if (k === arg.length - 1) i++;
           break;
         }
+        if (flag === "u" || flag === "S") break; // -uno, -S<key>: the rest of the word is a value
         if (flag === "a") commit.all = true;
         else if (flag === "n") commit.noVerify = true;
       }

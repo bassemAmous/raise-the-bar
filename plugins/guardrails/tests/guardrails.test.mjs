@@ -13,7 +13,7 @@ import { dangerIn } from "../lib/danger.mjs";
 import { judgeCommand, judgeEdit } from "../lib/judge.mjs";
 import { gitCalls, pushesIn } from "../lib/push.mjs";
 import { reviewTrailer } from "../lib/records.mjs";
-import { scanDiff, secretFiles } from "../lib/secrets.mjs";
+import { scanDiff, scanText, secretFiles } from "../lib/secrets.mjs";
 import { callsIn } from "../lib/shell.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,6 +24,7 @@ const made = [];
 // Fake keys are built at run time, so this file never holds something that looks like a key.
 const FAKE_AWS = "AKIA" + "ABCDEFGHIJKLMNOP";
 const FAKE_STRIPE = "sk_" + "live_" + "a1b2c3d4e5f6g7h8i9j0k1l2";
+const FAKE_PASSWORD = "S3cr3t" + "Passw0rd";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 const unix = (file) => file.split("\\").join("/");
@@ -186,11 +187,11 @@ test("secret scan: added lines only, placeholders and pragma pass, value is neve
     `+const pay = "${FAKE_STRIPE}";`,
     '+const password = "your_password_here";',
     `+const fixture = "${FAKE_AWS}"; // guardrails:allow-secret`,
-    '+const db = "postgres://app:S3cr3tPassw0rd@db.internal:5432/app";',
+    `+const db = "postgres://app:${FAKE_PASSWORD}@db.internal:5432/app";`,
     '+const local = "postgres://app:${DB_PASSWORD}@localhost/app";',
     '+const compose = "postgres://postgres:postgres@db:5432/app";',
     '+const tutorial = "mysql://user:password@db.internal/app";',
-    '+const laptop = "redis://app:S3cr3tPassw0rd@localhost:6379";',
+    `+const laptop = "redis://app:${FAKE_PASSWORD}@localhost:6379";`,
   ].join("\n");
   const findings = scanDiff(diff);
   assert.deepEqual(
@@ -205,8 +206,20 @@ test("secret scan: added lines only, placeholders and pragma pass, value is neve
   assert.ok(!findings[2].shown.includes("Passw0rd"));
   assert.deepEqual(scanDiff(diff, { allowPaths: ["config.js"] }), []);
   assert.deepEqual(
-    secretFiles([".env", ".env.production", ".env.example", "src/env.ts", "certs/public.pem", "certs/server.p12"]),
-    [".env", ".env.production", "certs/server.p12"],
+    secretFiles([
+      ".env",
+      ".env.production",
+      ".env.example",
+      "src/env.ts",
+      "certs/public.pem",
+      "certs/server.p12",
+      ".envrc",
+      "deploy/prod.env",
+      "infra/terraform.tfstate",
+      "infra/prod.tfvars",
+      "infra/variables.tf",
+    ]),
+    [".env", ".env.production", "certs/server.p12", ".envrc", "deploy/prod.env", "infra/terraform.tfstate", "infra/prod.tfvars"],
   );
 });
 
@@ -254,12 +267,101 @@ test("git add and git commit on one line: the files are read as they are now", (
   assert.match(judge(repo, 'git add . && git commit -m "x"').reason, /server\.pem:1\s+private-key/);
   fs.writeFileSync(path.join(repo, "server.pem"), "-----BEGIN CERTIFICATE-----\nabc\n");
   assert.equal(verdictOf(repo, 'git add . && git commit -m "x"'), "allow", "a public certificate is fine");
+});
 
-  // A file the same line creates cannot be read before the line runs: the commit goes alone.
-  const made = judge(repo, 'echo "KEY=1" > settings.txt && git add . && git commit -m "x"');
-  assert.equal(made.decision, "deny");
-  assert.match(made.reason, /as its own command/);
-  assert.equal(verdictOf(repo, 'curl -o key.txt https://example.com/k && git add . && git commit -m "x"'), "deny");
+test("a commit never takes files that an earlier step on the line could have written", () => {
+  const repo = makeRepo();
+  // The scan reads the files before the line runs. What a step writes after that is unseen.
+  for (const line of [
+    'echo "KEY=1" > settings.txt && git add . && git commit -m "x"',
+    'curl -o key.txt https://example.com/k && git add . && git commit -m "x"',
+    'npm run build && git add -A && git commit -m "build"',
+    'node scripts/gen-config.js && git commit -am "config"',
+    'ssh-keygen -t ed25519 -f deploy_key -N "" && git add -A && git commit -m "key"',
+    'git stash pop && git commit -am "x"',
+    'git checkout other-branch -- config/ && git commit -m "x"',
+    'git restore --source=other -- . && git commit -am "x"',
+    'git merge --squash feature/y && git commit -m "squash"',
+  ]) {
+    const verdict = judge(repo, line);
+    assert.equal(verdict.decision, "deny", line);
+    assert.match(verdict.reason, /as their own command|as its own command/, line);
+  }
+  for (const line of ["npm run build; git add -A; git commit -m build", "'KEY=1' | Out-File .env; git add -A; git commit -m env"])
+    assert.equal(judgePs(repo, line).decision, "deny", line);
+
+  // The everyday lines stay free: nothing is written, or the commit takes only what is staged.
+  for (const line of [
+    'git add . && git commit -m "x"',
+    'git status && git diff --stat && git add -A && git commit -m "x"',
+    'npm test && git commit -m "x"',
+    'mkdir -p docs && git add . && git commit -m "x"',
+    'rm -f old.txt && git add -A && git commit -m "x"',
+    'git checkout -b feature/z && git add . && git commit -m "x"',
+    'git reset -q && git add app.js && git commit -m "x"',
+    'git add . && git commit -m "x" && npm run build',
+  ])
+    assert.equal(verdictOf(repo, line), "allow", line);
+});
+
+test("an ignored file, another encoding, or a comment do not hide a secret", () => {
+  const repo = makeRepo();
+  fs.writeFileSync(path.join(repo, ".gitignore"), "local/\n");
+  fs.mkdirSync(path.join(repo, "local"));
+  fs.writeFileSync(path.join(repo, "local", "keys.js"), `export const key = "${FAKE_AWS}";\n`);
+  assert.equal(verdictOf(repo, 'git add . && git commit -m "x"'), "allow", "git leaves an ignored file out");
+  for (const line of ['git add -f local/keys.js && git commit -m "x"', 'git add --force . && git commit -m "x"']) {
+    assert.match(judge(repo, line).reason ?? "allowed", /local\/keys\.js:1\s+aws-access-key/, line);
+  }
+  fs.rmSync(path.join(repo, "local"), { recursive: true });
+
+  // A file saved by Windows tools as UTF-16 is still text.
+  const wide = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(`key = "${FAKE_AWS}"\r\n`, "utf16le")]);
+  fs.writeFileSync(path.join(repo, "settings.ps1"), wide);
+  assert.match(judge(repo, 'git add . && git commit -m "x"').reason ?? "allowed", /settings\.ps1:1\s+aws-access-key/);
+  fs.rmSync(path.join(repo, "settings.ps1"));
+
+  // The agent can write the allow comment itself, so the comment asks a human. It does not pass alone.
+  fs.writeFileSync(path.join(repo, "fixture.js"), `export const key = "${FAKE_AWS}"; // guardrails:allow-secret\n`);
+  const waived = judge(repo, 'git add . && git commit -m "x"');
+  assert.equal(waived.decision, "ask");
+  assert.match(waived.reason, /fixture\.js:1\s+aws-access-key/);
+  assert.ok(!waived.reason.includes(FAKE_AWS.slice(6)), "the value is never printed");
+  fs.appendFileSync(path.join(repo, "fixture.js"), `export const other = "${FAKE_STRIPE}";\n`);
+  assert.equal(verdictOf(repo, 'git add . && git commit -m "x"'), "deny", "one unmarked secret is enough");
+});
+
+test("secret rules: the common key shapes are found, the common look-alikes are not", () => {
+  const rules = (text, file = "src/config.js") => scanText(text, file).map((finding) => finding.rule);
+  const random = "q7Rz2Lk9Xv4Tn8Wb3Yc6Hd1Jm5Pf0GsAe";
+  const found = [
+    [`aws_secret_access_key = "${random}${"Zx81"}${"Qw"}"`, "src/config.js"],
+    [`const hook = "https://hooks.slack.com/${"services"}/T00000000/B00000000/${random.slice(0, 24)}";`, "src/notify.js"],
+    [`const slack = "${"xox"}b-123456789012-123456789012-${random.slice(0, 24)}";`, "src/notify.js"],
+    [`const gitlab = "${"glpat"}-${random.slice(0, 20)}";`, "src/ci.js"],
+    [`const mail = "${"SG"}.${random.slice(0, 22)}.${random}${random.slice(0, 10)}";`, "src/mail.js"],
+    [`SECRET_KEY = '${random}${random.slice(0, 17)}'`, "settings.py"],
+    [`Authorization: Bearer ${random}${random}`, "docs/api.http"],
+    [`const cache = "redis://:${random.slice(0, 16)}@cache.internal:6379";`, "src/cache.js"],
+    [`DB_PASSWORD=${random.slice(0, 20)}`, ".env.production"],
+    [`  password: ${random.slice(0, 20)}`, "config/app.yml"],
+    [`curl -u deploy:${random.slice(0, 14)} https://build.internal/run`, "scripts/run.sh"],
+  ];
+  for (const [text, file] of found) assert.ok(rules(text, file).length > 0, `should find: ${text.slice(0, 40)}… in ${file}`);
+
+  const quiet = [
+    ['const password = "correct-horse-battery-staple";', "tests/login.test.js"],
+    ['password: "string | undefined | null",', "src/types.ts"],
+    ["const token = process.env.API_TOKEN;", "src/api.js"],
+    ['const apiKey = "YOUR_API_KEY_HERE";', "README.md"],
+    ["DB_PASSWORD=${DB_PASSWORD}", "deploy/app.env"],
+    ["  password: ${{ secrets.DB_PASSWORD }}", ".github/workflows/ci.yml"],
+    ['const url = "postgres://postgres:postgres@localhost:5432/app";', "src/db.js"],
+    ["curl -u admin:$PASSWORD https://build.internal/run", "scripts/run.sh"],
+    ['const PASSWORD_FIELD = "PASSWORD_CONFIRMATION";', "src/form.js"],
+    ['"integrity": "sha512-q7Rz2Lk9Xv4Tn8Wb3Yc6Hd1Jm5Pf0GsAeq7Rz2Lk9Xv4Tn8Wb3Yc6Hd1Jm5Pf0GsAe=="', "package-lock.json"],
+  ];
+  for (const [text, file] of quiet) assert.deepEqual(rules(text, file), [], `should stay quiet: ${text}`);
 });
 
 test("the secret scan does not go blind: big diffs and a first commit", () => {
@@ -282,7 +384,9 @@ test("the secret scan does not go blind: big diffs and a first commit", () => {
   fs.mkdirSync(nowhere);
   const created = judge(nowhere, 'git init && git add . && git commit -m "first"');
   assert.equal(created.decision, "deny");
-  assert.match(created.reason, /creates a repository/);
+  assert.match(created.reason, /creates a folder or a repository/);
+  // An empty first commit has nothing in it to scan.
+  assert.equal(verdictOf(nowhere, "mkdir demo && cd demo && git init && git commit --allow-empty -m init"), "allow");
 });
 
 test("the full path to production: tests, review, then a human", () => {
@@ -335,10 +439,23 @@ test("the full path to production: tests, review, then a human", () => {
   const otherCommit = transcript(repo, [typed("approve production 0000000")]);
   assert.equal(verdictOf(repo, push, otherCommit), "deny", "approval names the commit");
 
-  for (const prose of [`do NOT approve production ${head.slice(0, 8)} yet`, `should I type "${line}"?`, `${line} tomorrow maybe`])
+  // The whole message is the approval. A sentence, a paste or a quote that holds the line is not.
+  for (const prose of [
+    `do NOT approve production ${head.slice(0, 8)} yet`,
+    `should I type "${line}"?`,
+    `${line} tomorrow maybe`,
+    `Do not do this:\n${line}`,
+    `Looks good.\n${line}\nThanks`,
+    `The guard said:\n  ask the human to send this line as a message of its own:\n      ${line}`,
+  ])
     assert.equal(verdictOf(repo, push, transcript(repo, [typed(prose)])), "deny", prose);
 
-  const approved = transcript(repo, [typed("ok ship it"), typed(`Looks good.\n  Approve  Production ${head.slice(0, 7)}.\nThanks`)]);
+  // Hours of tool output after the approval do not push it out of reach.
+  const filler = { type: "user", timestamp: new Date().toISOString(), message: { content: [{ type: "tool_result", content: "x".repeat(64 * 1024) }] } };
+  const buried = transcript(repo, [typed(line), ...Array.from({ length: 40 }, () => filler)]);
+  assert.equal(verdictOf(repo, push, buried), "allow");
+
+  const approved = transcript(repo, [typed("ok ship it"), typed(`  Approve  Production ${head.slice(0, 7)}.\n`)]);
   assert.equal(verdictOf(repo, push, approved), "allow");
 
   commit(repo, "app.js", "export const answer = 43;\n");
@@ -373,6 +490,52 @@ test("a push to a protected branch is sent as its own command", () => {
   assert.equal(verdictOf(repo, 'git checkout -b feature/y && git commit -am "wip" && git push -u origin feature/y'), "allow");
   // A push that names no branch, after a switch the guard cannot follow.
   assert.equal(verdictOf(repo, "git checkout - && git push"), "deny");
+  assert.equal(verdictOf(repo, "git switch - && git push"), "deny");
+});
+
+test("a push stays a push behind an alias, a script block or a new process", () => {
+  const repo = makeRepo();
+  commit(repo, "app.js", "export const answer = 42;\n");
+  sh(repo, "config", "alias.pom", "push origin main");
+  sh(repo, "config", "alias.p", "push");
+  sh(repo, "config", "alias.ship", "!git push origin main");
+  for (const line of [
+    "git pom",
+    "git p origin main",
+    "git p",
+    "git ship",
+    "git -c alias.x=push x origin main",
+    'echo "git push origin main" | bash',
+    "printf 'git push origin main\\n' | sh",
+    "bash <<'EOF'\ngit push origin main\nEOF",
+    "cat <<'EOF' | bash\ngit push origin main\nEOF",
+    "git push origin $(git branch --show-current)",
+  ])
+    assert.match(judge(repo, line).reason ?? "allowed", NOT_READY, line);
+  for (const line of [
+    "try { git push origin main } catch { }",
+    "& { git push origin main }",
+    "Start-Process git -ArgumentList 'push','origin','main' -Wait",
+    "Start-Process -FilePath git -ArgumentList 'push origin main'",
+    "git push origin main,feature/x",
+    "echo 'git push origin main' | powershell -Command -",
+  ])
+    assert.match(judgePs(repo, line).reason ?? "allowed", NOT_READY, line);
+
+  // Behind a condition the guard cannot weigh, the push is still seen and still refused.
+  for (const line of [
+    "if ($LASTEXITCODE -eq 0) { git push origin main }",
+    "1..3 | ForEach-Object { git push origin main }",
+    "'git push origin main' | powershell -Command -",
+  ])
+    assert.equal(judgePs(repo, line).decision, "deny", line);
+  // A git word the guard cannot name is not waved through.
+  assert.equal(verdictOf(repo, 'git "$VERB" origin main'), "deny");
+  // An alias that only reads stays free, and so does text that is only printed.
+  sh(repo, "config", "alias.lg", "log --oneline -5");
+  assert.equal(verdictOf(repo, "git lg"), "allow");
+  assert.equal(verdictOf(repo, 'echo "git push origin main" | cat'), "allow");
+  assert.equal(verdictOf(repo, 'echo "git push origin main" | grep push'), "allow");
 });
 
 test("the guard follows the folder, or refuses", () => {
@@ -597,8 +760,37 @@ test("destructive commands: the catastrophe is refused, the everyday twin is not
     "truncate -s 0 app.log",
     "npm test",
   ];
-  for (const command of refused) assert.ok(dangerIn(command), `should refuse: ${command}`);
-  for (const command of fine) assert.equal(dangerIn(command), null, `should allow: ${command}`);
+  const repo = makeRepo();
+  fs.mkdirSync(path.join(repo, "dist"));
+  fs.mkdirSync(path.join(repo, "vendor", "lib", ".git"), { recursive: true });
+  const danger = (command, shell) => dangerIn(callsIn(command, unix(repo), { shell }));
+  for (const command of refused) assert.ok(danger(command), `should refuse: ${command}`);
+  for (const command of fine) assert.equal(danger(command), null, `should allow: ${command}`);
+
+  // The repository the command stands in is history too, however the path is written.
+  for (const command of [
+    "rm -rf .",
+    "rm -rf ./",
+    "rm -rf .*",
+    'rm -rf "$(pwd)"',
+    'rm -rf "$PWD"',
+    "rm -rf ../repo",
+    `rm -rf "${unix(repo)}"`,
+    "cd dist && rm -rf ../.git",
+    "cd dist && rm -rf ..",
+  ])
+    assert.ok(danger(command), `should refuse: ${command}`);
+  for (const command of [
+    "Remove-Item -Recurse:$true -Force .git",
+    "Remove-Item * -Recurse -Force",
+    "cmd /c rd /s /q C:\\",
+    "cmd /c del /s /q C:\\*",
+  ])
+    assert.ok(danger(command, "powershell"), `should refuse: ${command}`);
+  // A .git folder below the repository (a fresh clone, a template) is the caller's to remove.
+  for (const command of ["rm -rf vendor/lib/.git", "rm -rf vendor", "rm -rf *", "cd dist && rm -rf .", "rm -rf ./.cache"])
+    assert.equal(danger(command), null, `should allow: ${command}`);
+  assert.equal(danger("Remove-Item dist -Recurse -Force", "powershell"), null);
 });
 
 test("the agent cannot approve, forge a record, or quietly change the rules", () => {
@@ -610,6 +802,9 @@ test("the agent cannot approve, forge a record, or quietly change the rules", ()
     `echo abc1234 | node "${cliPath}" approve`,
     'script -qc "guardrails approve" /dev/null',
     'bash -c "guardrails approve"',
+    `cd "${path.posix.dirname(cliPath)}" && node cli.mjs approve`,
+    `cd "${path.posix.dirname(cliPath)}" && script -qc "node ./cli.mjs approve" /dev/null`,
+    "GR=guardrails; $GR approve",
     "echo '{}' > .git/guardrails/approval/abc.json",
     "ls; echo '{}' >> .git/guardrails/audit.log",
     "rm -rf .git/modules/lib/guardrails",
@@ -838,6 +1033,18 @@ test("a very long command line is judged in good time", () => {
   assert.equal(verdictOf(repo, `echo "${"git commit -m x && git push origin main; ".repeat(5000)}"`), "allow");
   assert.equal(verdictOf(repo, `git commit --allow-empty -m "${"a ".repeat(200000)} --no-verify"`), "allow");
   assert.equal(verdictOf(repo, "git commit --allow-empty -m x; ".repeat(300)), "allow");
-  assert.equal(verdictOf(repo, `${"(".repeat(500)}git status${")".repeat(500)}`), "allow");
   assert.ok(Date.now() - started < 15000, `took ${Date.now() - started} ms`);
+});
+
+test("a line the guard cannot read to the end is refused, not waved through", () => {
+  const repo = makeRepo();
+  commit(repo, "app.js", "export const answer = 42;\n");
+  // Commands inside commands, deeper than the reader follows: a push could hide at the bottom.
+  const deep = (levels, inner) => `${'bash -c "'.repeat(1)}${"$(".repeat(levels)}${inner}${")".repeat(levels)}"`;
+  assert.match(judge(repo, deep(40, "git push origin main")).reason, /deeper than the guard reads/);
+  assert.match(judge(repo, `${"(".repeat(500)}git status${")".repeat(500)}`).reason, /deeper than the guard reads/);
+  assert.match(judge(repo, deep(4, "git push origin main")).reason, NOT_READY);
+  // More checks than one line can pay for.
+  const many = Array.from({ length: 25 }, (_, index) => `git push origin HEAD:feature/${index}`).join("; ");
+  assert.match(judge(repo, many).reason, /more than 20 different commits and pushes/);
 });

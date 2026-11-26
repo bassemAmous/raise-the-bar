@@ -5,6 +5,8 @@ import { callsIn, gitCall } from "./shell.mjs";
 
 const OPTIONS_WITH_VALUE = new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]);
 const UNREADABLE = /[$`%]/;
+// Two common ways to write "the branch I am on". They are read as that, not as a variable.
+const CURRENT_BRANCH = /^\$\(\s*git\s+(?:branch\s+--show-current|rev-parse\s+--abbrev-ref\s+HEAD|symbolic-ref\s+--short\s+HEAD)\s*\)$/;
 
 /** Every git call in a shell command: [{ folder, verb, args, globals, call }], following `cd` and `git -C`. */
 export function gitCalls(command, cwd, options) {
@@ -13,7 +15,8 @@ export function gitCalls(command, cwd, options) {
 
 const branchName = (ref) => ref.replace(/^refs\/heads\//, "").replace(/^heads\//, "");
 
-function parseRefspec(spec, currentBranch) {
+/** `remoteName` gives the branch a bare local name lands on (it differs with push.default=upstream). */
+function parseRefspec(spec, currentBranch, remoteName) {
   const forced = spec.startsWith("+");
   const body = forced ? spec.slice(1) : spec;
   const colon = body.indexOf(":");
@@ -21,6 +24,7 @@ function parseRefspec(spec, currentBranch) {
   let dst = colon === -1 ? body : body.slice(colon + 1);
   const deletes = colon === 0;
   if (colon === -1 && (body === "HEAD" || body === "@")) dst = currentBranch ?? "HEAD";
+  else if (colon === -1) dst = remoteName(branchName(body));
   if (colon > 0 && dst === "") dst = src; // "main:" pushes to the branch of the same name
   return { src: branchName(src) || null, dst: branchName(dst), forced, deletes };
 }
@@ -29,25 +33,25 @@ const lines = (text) => (text ?? "").split("\n").filter(Boolean);
 
 /**
  * What one `git push` call does:
- * { folder, isRepo, remote, force, noVerify, dryRun, unreadable, all, implicit,
- *   targets: [{ src, dst, forced, deletes }] }
- * `implicit` is true when the command names no branch, so git picks the current one.
+ * { folder, remote, force, dryRun, unreadable, implicit, landsOn, targets: [{ src, dst, forced, deletes }] }
+ * `implicit` is true when the command leaves the branch to git, which picks the current one.
+ * `landsOn(branch)` names the remote branch a local branch is pushed to when none is written.
+ * When the folder is not a repository that can be read, `targets` stays empty.
  */
 export function readPush(git) {
   const folder = git.folder;
   const push = {
     folder,
-    isRepo: false,
     remote: null,
     force: false,
-    noVerify: false,
     dryRun: false,
     unreadable: false,
-    all: false,
     implicit: false,
+    landsOn: (branch) => branch,
     targets: [],
   };
   const positional = [];
+  let all = false;
   let deleteMode = false;
   let tagsOnly = false;
   let prune = false;
@@ -63,12 +67,11 @@ export function readPush(git) {
       else if (arg.startsWith("--repo=")) repoOption = arg.slice(7);
       else if (OPTIONS_WITH_VALUE.has(arg)) i++;
       else if (arg.startsWith("--force")) push.force = true;
-      else if (arg === "--mirror") push.force = push.all = prune = true;
+      else if (arg === "--mirror") push.force = all = prune = true;
       else if (arg === "--prune") prune = true;
-      else if (arg === "--no-verify") push.noVerify = true;
       else if (arg === "--dry-run") push.dryRun = true;
       else if (arg === "--delete") deleteMode = true;
-      else if (arg === "--all" || arg === "--branches") push.all = true;
+      else if (arg === "--all" || arg === "--branches") all = true;
       else if (arg === "--tags") tagsOnly = true;
       continue;
     }
@@ -84,10 +87,10 @@ export function readPush(git) {
     }
     positional.push(arg);
   }
-  if (positional.some((word) => UNREADABLE.test(word))) push.unreadable = true;
+  if (positional.some((word, index) => UNREADABLE.test(word) && !(index > 0 && CURRENT_BRANCH.test(word))))
+    push.unreadable = true;
   if (folder === null || !fs.existsSync(folder)) return push;
   if (tryGit(["rev-parse", "--git-dir"], folder) === null) return push;
-  push.isRepo = true;
 
   const currentBranch = tryGit(["symbolic-ref", "--short", "-q", "HEAD"], folder);
   const configured = (key) => tryGit(["config", key], folder);
@@ -99,33 +102,50 @@ export function readPush(git) {
     (currentBranch && configured(`branch.${currentBranch}.remote`)) ??
     "origin";
 
+  let pushDefault; // read once, and only when a push needs it
+  const mode = () => (pushDefault ??= configured("push.default") ?? "simple");
+  // With push.default=upstream, `git push origin hotfix` lands on the branch hotfix follows.
+  const remoteName = (branch) => {
+    if (mode() !== "upstream" && mode() !== "tracking") return branch;
+    const follows = lines(tryGit(["config", "--get-all", `branch.${branch}.merge`], folder));
+    return follows.length === 1 ? branchName(follows[0]) : branch;
+  };
+
+  push.landsOn = remoteName;
+
   const localBranches = () => lines(tryGit(["for-each-ref", "--format=%(refname:short)", "refs/heads"], folder));
   const specs = [];
   let matching = false;
+  let current = false; // the line names "the branch I am on"
   for (let i = 1; i < positional.length; i++) {
     if (positional[i] === "tag") {
       i++; // "tag v1.2" pushes a tag, not a branch
       tagsOnly = true;
-    }
+    } else if (CURRENT_BRANCH.test(positional[i])) current = true;
     else if (positional[i] === ":" || positional[i] === "+:" || positional[i].includes("*")) {
       matching = true;
       if (positional[i].startsWith("+")) push.force = true;
+    } else if (positional[i].includes(",")) {
+      // PowerShell hands `main,feature/x` to git as two branches. Read both ways: the stricter one wins.
+      specs.push(positional[i], ...positional[i].split(",").filter(Boolean));
     } else specs.push(positional[i]);
   }
 
-  if (push.all || matching) {
+  const bare = !all && !matching && !current && specs.length === 0 && !tagsOnly;
+  if (bare && mode() === "matching") matching = true; // every local branch that has a twin on the remote
+  if (all || matching) {
     for (const branch of localBranches()) push.targets.push({ src: branch, dst: branch, forced: false, deletes: false });
   }
   for (const spec of specs) {
-    const target = parseRefspec(spec, currentBranch);
+    const target = parseRefspec(spec, currentBranch, remoteName);
     if (deleteMode) target.deletes = true;
     push.targets.push(target);
   }
-  if (!push.all && !matching && specs.length === 0 && !tagsOnly) {
+  if (current || (bare && !matching)) {
     push.implicit = true;
     if (currentBranch) {
       // With push.default=upstream the branch on the remote can have another name.
-      const upstream = tryGit(["rev-parse", "--abbrev-ref", "@{push}"], folder);
+      const upstream = current ? null : tryGit(["rev-parse", "--abbrev-ref", "@{push}"], folder);
       const prefix = `${push.remote}/`;
       const dst = upstream?.startsWith(prefix) ? upstream.slice(prefix.length) : currentBranch;
       push.targets.push({ src: "HEAD", dst, forced: false, deletes: false });
