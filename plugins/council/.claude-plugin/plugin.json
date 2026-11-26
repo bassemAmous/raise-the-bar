@@ -1,0 +1,19 @@
+{
+  "name": "council",
+  "version": "0.1.0",
+  "description": "Decision skills where opposed viewpoints argue one question and the dissent is kept: boardroom, senior-council, strategy and red-team, with a read-only council seat agent.",
+  "author": {
+    "name": "bassemAmous",
+    "url": "https://github.com/bassemAmous"
+  },
+  "homepage": "https://github.com/bassemAmous/raise-the-bar",
+  "repository": "https://github.com/bassemAmous/raise-the-bar",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "decisions",
+    "strategy",
+    "product",
+    "red-team"
+  ]
+}

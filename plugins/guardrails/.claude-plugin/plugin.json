@@ -1,0 +1,20 @@
+{
+  "name": "guardrails",
+  "version": "0.1.0",
+  "description": "Guard hooks for agent-written code: secrets stopped at commit, no push to a protected branch without a recorded test pass and review of the exact code, and production locked until a human approves. With a read-only reviewer agent and three review skills.",
+  "author": {
+    "name": "bassemAmous",
+    "url": "https://github.com/bassemAmous"
+  },
+  "homepage": "https://github.com/bassemAmous/raise-the-bar",
+  "repository": "https://github.com/bassemAmous/raise-the-bar",
+  "license": "MIT",
+  "keywords": [
+    "guardrails",
+    "hooks",
+    "security",
+    "review",
+    "approval",
+    "git"
+  ]
+}

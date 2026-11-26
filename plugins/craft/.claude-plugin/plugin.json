@@ -1,0 +1,20 @@
+{
+  "name": "craft",
+  "version": "0.1.0",
+  "description": "Engineering skills that hold agent work to a senior bar: build-it, clean-code, performance, bug-hunt, ux-review, worktree-first, bug-retro and later.",
+  "author": {
+    "name": "bassemAmous",
+    "url": "https://github.com/bassemAmous"
+  },
+  "homepage": "https://github.com/bassemAmous/raise-the-bar",
+  "repository": "https://github.com/bassemAmous/raise-the-bar",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "code-quality",
+    "performance",
+    "testing",
+    "ux",
+    "worktree"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "raise-the-bar",
+  "description": "Claude Code plugins for agent-written code that still has to be safe to ship: guard hooks, engineering skills and decision councils.",
+  "owner": {
+    "name": "bassemAmous",
+    "url": "https://github.com/bassemAmous"
+  },
+  "plugins": [
+    {
+      "name": "guardrails",
+      "source": "./plugins/guardrails",
+      "description": "Guard hooks for agent-written code: secrets stopped at commit, no push to a protected branch without a recorded test pass and review of the exact code, and production locked until a human approves. With a read-only reviewer agent and three review skills.",
+      "category": "development",
+      "keywords": [
+        "guardrails",
+        "hooks",
+        "security",
+        "review",
+        "approval",
+        "git"
+      ]
+    },
+    {
+      "name": "craft",
+      "source": "./plugins/craft",
+      "description": "Engineering skills that hold agent work to a senior bar: build-it, clean-code, performance, bug-hunt, ux-review, worktree-first, bug-retro and later.",
+      "category": "development",
+      "keywords": [
+        "skills",
+        "code-quality",
+        "performance",
+        "testing",
+        "ux",
+        "worktree"
+      ]
+    },
+    {
+      "name": "council",
+      "source": "./plugins/council",
+      "description": "Decision skills where opposed viewpoints argue one question and the dissent is kept: boardroom, senior-council, strategy and red-team, with a read-only council seat agent.",
+      "category": "development",
+      "keywords": [
+        "skills",
+        "decisions",
+        "strategy",
+        "product",
+        "red-team"
+      ]
+    }
+  ]
+}

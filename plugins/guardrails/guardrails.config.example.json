@@ -1,0 +1,46 @@
+{
+  "protectedBranches": [
+    "main",
+    "master",
+    "staging",
+    "production",
+    "prod",
+    "release/*"
+  ],
+  "productionBranches": [
+    "main",
+    "master",
+    "production",
+    "prod"
+  ],
+  "productionCommands": [
+    "\\bdeploy\\b.*--prod(uction)?\\b"
+  ],
+  "ignorePaths": [
+    "**/*.md",
+    "docs/**",
+    "LICENSE",
+    ".gitignore"
+  ],
+  "tests": {
+    "required": true,
+    "command": "npm test"
+  },
+  "review": {
+    "required": true
+  },
+  "approval": {
+    "phrase": "approve production",
+    "maxAgeMinutes": 60
+  },
+  "secretScan": {
+    "enabled": true,
+    "allowPaths": [
+      "tests/fixtures/**"
+    ]
+  },
+  "dangerGuard": {
+    "enabled": true
+  },
+  "onGuardError": "allow"
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+# The guardrails command. While the plugin is enabled, this folder is on the PATH of the agent's shell.
+exec node "$(dirname "$0")/../cli.mjs" "$@"
