@@ -1,15 +1,27 @@
-# raise-the-bar
+<div align="center">
+
+<img src="assets/hero.svg" width="860" alt="raise-the-bar: Claude Code plugins. Let the agent write the code. Keep the decision to ship.">
 
 [![test](https://github.com/bassemAmous/raise-the-bar/actions/workflows/test.yml/badge.svg)](https://github.com/bassemAmous/raise-the-bar/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Claude Code: 3 plugins](https://img.shields.io/badge/Claude%20Code-3%20plugins-56d4dd)
+![15 skills](https://img.shields.io/badge/skills-15-56d4dd)
+![Node.js 20 or newer](https://img.shields.io/badge/node-20%2B-3fb950)
+![no dependencies](https://img.shields.io/badge/dependencies-none-3fb950)
 
-**Let the agent write the code. Keep the decision to ship.**
+**[Install](#install)** · **[guardrails](#guardrails)** · **[craft](#craft)** · **[council](#council)** · **[Why](#why-this-exists)** · **[Limits](#honest-limits)**
+
+</div>
 
 Three plugins for [Claude Code](https://claude.com/claude-code). They hold agent-written work to
 the bar a senior engineer would: tested, reviewed by someone who did not write it, and never in
 production without a person saying yes.
 
-![The guard refuses a push to main and lists what is missing](assets/guardrails-demo.svg)
+## See it refuse a push
+
+<div align="center">
+<img src="assets/guardrails-demo.svg" width="860" alt="Terminal: the guard refuses a push to main and lists what is missing: tests, review and a human approval">
+</div>
 
 That is real output, and the picture is generated from it. Reproduce it with
 `node plugins/guardrails/scripts/demo.mjs`.
@@ -25,9 +37,20 @@ That is real output, and the picture is generated from it. Reproduce it with
 
 Each plugin works alone. Needs Node.js 20 or newer and git. No other dependency.
 
+## From idea to production
+
+<div align="center">
+<img src="assets/flow.svg" width="860" alt="Three stages. Decide with council: opposed seats argue, numbers are traced to a source, the dissent is kept. Build with craft: the plan is reviewed before code, a fix is proven red then green, real screens are reviewed. Ship with guardrails: no secret in a commit, tests on record, a read-only review, and a human approves.">
+</div>
+
+`council` helps decide what to build. `craft` shapes how it is built. `guardrails` checks what is
+about to ship. Use one, or all three.
+
 ## The three plugins
 
-### guardrails: the rules an agent cannot talk its way past
+### guardrails
+
+**The rules an agent cannot talk its way past.**
 
 Hooks that run before the agent's commands. They do not ask the agent to behave; they check.
 
@@ -46,7 +69,9 @@ agent that has no tools that write, so a review cannot change the code it review
 
 [Read more](plugins/guardrails/README.md)
 
-### craft: how the work gets done
+### craft
+
+**How the work gets done.**
 
 Eight skills for everyday engineering.
 
@@ -63,7 +88,9 @@ Eight skills for everyday engineering.
 
 [Read more](plugins/craft/README.md)
 
-### council: decisions with the disagreement left in
+### council
+
+**Decisions with the disagreement left in.**
 
 Four skills for decisions that are hard to undo. Each one puts opposed viewpoints in front of the
 same question, makes them argue, and keeps the dissent in the answer instead of averaging it away.

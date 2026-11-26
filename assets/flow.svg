@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 316" width="860" height="316" role="img" aria-label="From idea to production in three stages. Decide with council: opposed seats argue, numbers are traced to a source, the dissent is kept. Build with craft: the plan is reviewed before code, a fix is proven red then green, real screens are reviewed. Ship with guardrails: no secret in a commit, tests on record, a read-only review, and a human approves.">
+  <title>From idea to production: decide, build, ship</title>
+  <style>
+    .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    /* One change travels from idea to production. Each check lights when it is passed.
+       Without animation the picture shows the end: every check passed. */
+    .dot, .done, .p, .c, .end, .ring { animation-duration: 12s; animation-timing-function: linear; animation-iteration-count: infinite; }
+    .dot { animation-name: run; }
+    .done { animation-name: fill; }
+    .p1 { animation-name: p1; } .p2 { animation-name: p2; } .p3 { animation-name: p3; }
+    .c1 { animation-name: c1; } .c2 { animation-name: c2; } .c3 { animation-name: c3; }
+    .c4 { animation-name: c4; } .c5 { animation-name: c5; } .c6 { animation-name: c6; }
+    .c7 { animation-name: c7; } .c8 { animation-name: c8; } .c9 { animation-name: c9; }
+    .c10 { animation-name: c10; }
+    .end { animation-name: end; }
+    .ring { animation-name: ring; }
+    @keyframes run {
+      0% { transform: translateX(0); opacity: 0; }
+      4% { transform: translateX(0); opacity: 1; }
+      80%, 94% { transform: translateX(780px); opacity: 1; }
+      100% { transform: translateX(780px); opacity: 0; }
+    }
+    @keyframes fill { 0%, 4% { stroke-dashoffset: 780; opacity: 1; } 80%, 94% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+    @keyframes p1 { 0%, 3% { stroke: #30363d; } 5%, 26% { stroke: #56d4dd; } 29%, 100% { stroke: #30363d; } }
+    @keyframes p2 { 0%, 28% { stroke: #30363d; } 31%, 53% { stroke: #56d4dd; } 56%, 100% { stroke: #30363d; } }
+    @keyframes p3 { 0%, 55% { stroke: #30363d; } 58%, 80% { stroke: #56d4dd; } 84%, 100% { stroke: #30363d; } }
+    @keyframes c1 { 0%, 9% { color: #484f58; } 11%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c2 { 0%, 15% { color: #484f58; } 17%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c3 { 0%, 21% { color: #484f58; } 23%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c4 { 0%, 35% { color: #484f58; } 37%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c5 { 0%, 41% { color: #484f58; } 43%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c6 { 0%, 47% { color: #484f58; } 49%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c7 { 0%, 60% { color: #484f58; } 62%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c8 { 0%, 65% { color: #484f58; } 67%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c9 { 0%, 70% { color: #484f58; } 72%, 95% { color: #3fb950; } 100% { color: #484f58; } }
+    @keyframes c10 { 0%, 75% { color: #484f58; } 77%, 95% { color: #56d4dd; } 100% { color: #484f58; } }
+    @keyframes end { 0%, 80% { fill: #30363d; } 82%, 95% { fill: #3fb950; } 100% { fill: #30363d; } }
+    @keyframes ring { 0%, 81% { transform: scale(1); opacity: 0; } 82% { transform: scale(1); opacity: .7; } 92%, 100% { transform: scale(2.6); opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .dot, .done, .p, .c, .end, .ring { animation: none; } }
+  </style>
+
+  <rect x=".5" y=".5" width="859" height="315" rx="12" fill="#0d1117" stroke="#30363d"/>
+
+  <!-- 01 Decide -->
+  <rect class="p p1" x="28" y="24" width="250" height="206" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="50" y="56" class="mono" font-size="11.5" letter-spacing="1.6" fill="#56d4dd">01 · DECIDE</text>
+  <text x="50" y="90" class="sans" font-size="26" font-weight="800" letter-spacing="-.5" fill="#f0f6fc">council</text>
+  <text x="50" y="112" class="mono" font-size="11.5" fill="#7d8590">4 skills</text>
+  <g class="sans" font-size="13.5" fill="#c9d1d9">
+    <text x="76" y="146.5">opposed seats argue</text>
+    <text x="76" y="170.5">numbers traced to a source</text>
+    <text x="76" y="194.5">the dissent is kept</text>
+  </g>
+
+  <!-- 02 Build -->
+  <rect class="p p2" x="305" y="24" width="250" height="206" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="327" y="56" class="mono" font-size="11.5" letter-spacing="1.6" fill="#56d4dd">02 · BUILD</text>
+  <text x="327" y="90" class="sans" font-size="26" font-weight="800" letter-spacing="-.5" fill="#f0f6fc">craft</text>
+  <text x="327" y="112" class="mono" font-size="11.5" fill="#7d8590">8 skills</text>
+  <g class="sans" font-size="13.5" fill="#c9d1d9">
+    <text x="353" y="146.5">plan reviewed before code</text>
+    <text x="353" y="170.5">fix proven red, then green</text>
+    <text x="353" y="194.5">real screens reviewed</text>
+  </g>
+
+  <!-- 03 Ship -->
+  <rect class="p p3" x="582" y="24" width="250" height="206" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="604" y="56" class="mono" font-size="11.5" letter-spacing="1.6" fill="#56d4dd">03 · SHIP</text>
+  <text x="604" y="90" class="sans" font-size="26" font-weight="800" letter-spacing="-.5" fill="#f0f6fc">guardrails</text>
+  <text x="604" y="112" class="mono" font-size="11.5" fill="#7d8590">7 rules · 3 skills · 1 reviewer</text>
+  <g class="sans" font-size="13.5" fill="#c9d1d9">
+    <text x="630" y="146.5">no secret in a commit</text>
+    <text x="630" y="170.5">tests on record</text>
+    <text x="630" y="194.5">read-only review</text>
+    <text x="630" y="218.5" font-weight="700" fill="#f0f6fc">a human approves</text>
+  </g>
+
+  <!-- The checks: a ring and a tick, coloured by "color" so one rule lights both. -->
+  <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <g class="c c1" color="#3fb950"><circle cx="58" cy="142" r="7.5"/><path d="M54.5 142.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c2" color="#3fb950"><circle cx="58" cy="166" r="7.5"/><path d="M54.5 166.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c3" color="#3fb950"><circle cx="58" cy="190" r="7.5"/><path d="M54.5 190.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c4" color="#3fb950"><circle cx="335" cy="142" r="7.5"/><path d="M331.5 142.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c5" color="#3fb950"><circle cx="335" cy="166" r="7.5"/><path d="M331.5 166.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c6" color="#3fb950"><circle cx="335" cy="190" r="7.5"/><path d="M331.5 190.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c7" color="#3fb950"><circle cx="612" cy="142" r="7.5"/><path d="M608.5 142.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c8" color="#3fb950"><circle cx="612" cy="166" r="7.5"/><path d="M608.5 166.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c9" color="#3fb950"><circle cx="612" cy="190" r="7.5"/><path d="M608.5 190.2l2.5 2.5l4.5-5"/></g>
+    <g class="c c10" color="#56d4dd"><circle cx="612" cy="214" r="7.5"/><path d="M608.5 214.2l2.5 2.5l4.5-5"/></g>
+  </g>
+
+  <!-- Arrows between the stages -->
+  <g fill="none" stroke="#7d8590" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M288 120l7 7l-7 7"/>
+    <path d="M565 120l7 7l-7 7"/>
+  </g>
+
+  <!-- The track: one change, from idea to production -->
+  <line x1="40" y1="266" x2="820" y2="266" stroke="#30363d" stroke-width="2" stroke-linecap="round"/>
+  <line class="done" x1="40" y1="266" x2="820" y2="266" stroke="#56d4dd" stroke-width="2" stroke-linecap="round" stroke-dasharray="780" stroke-dashoffset="0"/>
+  <circle cx="40" cy="266" r="5" fill="#0d1117" stroke="#56d4dd" stroke-width="2"/>
+  <circle class="ring" cx="820" cy="266" r="7" fill="none" stroke="#3fb950" stroke-width="2" opacity="0" style="transform-origin: 820px 266px"/>
+  <circle class="end" cx="820" cy="266" r="7" fill="#3fb950"/>
+  <g class="dot" opacity="0">
+    <circle cx="40" cy="266" r="11" fill="#56d4dd" opacity=".22"/>
+    <circle cx="40" cy="266" r="5" fill="#f0f6fc"/>
+  </g>
+  <text x="28" y="296" class="mono" font-size="11.5" letter-spacing="1" fill="#9da7b3">IDEA</text>
+  <text x="832" y="296" class="mono" font-size="11.5" letter-spacing="1" fill="#9da7b3" text-anchor="end">PRODUCTION</text>
+</svg>
