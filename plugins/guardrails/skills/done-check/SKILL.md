@@ -1,6 +1,6 @@
 ---
 name: done-check
-description: Checks a piece of work against evidence before anyone says it is done. Sizes the checks to the change, runs them, and reports what is proven, what is not, and what was not checked. Use before saying "done", "fixed", "shipped", "it works" or "ready", before handing work back to the user, before a demo, and when the user asks "is it really done", "did it land", "prove it", or "are you sure".
+description: Checks a piece of work against evidence before anyone says it is done. Sizes the checks to the change, runs them, and reports what is proven, what is not, and what was not checked. Use before reporting a multi-file or risky change as done, before a handover or a demo, or when the user asks "is it really done", "did it land", "prove it" or "are you sure". Not for a trivial edit or a pure question.
 ---
 
 # Done check
@@ -11,10 +11,12 @@ actually happened, and says so plainly either way.
 
 ## When to use
 
-- Every time you are about to tell the user something is finished, fixed or live.
+- Before you tell the user that a multi-file or risky change is finished, fixed or live.
+- Before a handover or a demo.
 - When the user doubts a result.
 
-Skip it for a pure question or a plan: there is nothing to prove yet.
+Skip it for a pure question or a plan: there is nothing to prove yet. Skip it for a trivial edit
+too, unless the user asks for proof.
 
 ## Steps
 

@@ -27,9 +27,9 @@ item nobody can restart is a lost item.
 ## Where the backlog lives
 
 Use the backlog the project already has, if there is one: look for a backlog or roadmap file, or
-ask whether the team uses an issue tracker and wants entries there. If nothing exists, create
-`docs/backlog/LATER.md` with the template below at the top. Keep one backlog. Notes scattered
-through the code as comments are not found again.
+ask whether the team uses an issue tracker and wants entries there. If nothing exists, ask the
+user before creating a file. The default is `docs/backlog/LATER.md`, with the template below at
+the top. Keep one backlog. Notes scattered through the code as comments are not found again.
 
 ## Steps
 

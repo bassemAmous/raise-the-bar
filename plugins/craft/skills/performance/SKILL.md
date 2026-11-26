@@ -54,9 +54,10 @@ that with a clean `git status`.
 
 Helper agents can do the mechanical scans (list sequential calls on the critical path, list
 queries with no limit, read a build's size table). Use a read-only agent such as
-`guardrails:readonly-reviewer`, on a cheaper, faster model. Each returns locations and pasted
+`craft:readonly-reviewer`, on a cheaper, faster model. Each returns locations and pasted
 lines, not conclusions. Root cause and ranking stay with the main session, on the strongest model
-you have. For a wider read-only pass, see `guardrails:readonly-audit`.
+you have. For a wider read-only pass, see `guardrails:readonly-audit`. That pass is optional. If
+the guardrails plugin is not installed, skip it.
 
 ## Output format
 

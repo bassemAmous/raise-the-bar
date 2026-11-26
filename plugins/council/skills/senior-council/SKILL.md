@@ -7,7 +7,8 @@ description: >-
   decision. Use when the user says "senior council", "debate this architecture", "which approach
   should we take", "argue both sides of this design", "is this migration worth it", "build or
   buy", or is about to commit to something costly to undo: a datastore, a rewrite, a migration, a
-  core dependency. Not for clear answers, small reversible choices, bugs or style questions.
+  core dependency. Not for clear answers, small reversible choices, bugs or style questions, and
+  not for a business build-or-buy such as a company, a contract or a service (use boardroom).
 ---
 
 # senior-council: opposed senior engineers on one technical fork
@@ -42,7 +43,7 @@ Only for a fork that is heavy on all three counts:
 - The decision was already made and written down. Re-open it only for a new fact.
 - It is a business call (price, pivot, hire). Use `boardroom`.
 
-A council costs about ten agent runs. If the fork does not deserve that, do not convene one.
+A council costs 10 to 12 agent runs. If the fork does not deserve that, do not convene one.
 
 ## Steps
 
@@ -66,8 +67,11 @@ Why: five agents arguing from a false premise is expensive theatre.
 
 Read `references/personas.md`. The default panel is five: `maintainer`, `security`, `oncall`,
 `product`, `skeptic`. Swap one for a standby persona (`data`, `cost`) when the fork is in its
-lane. Offer a panel of three when cost matters. Say the panel and the number of agent runs in one
-line before you start.
+lane. Offer a panel of three when cost matters.
+
+Show the panel and the number of agent runs in one short list and ask once before you start. A
+panel of five is 10 runs, a panel of three is 6, and a contrarian or an extra pass adds 1 each.
+Skip the question if the user named the panel or said "just run it".
 Why: the value comes from opposition. A panel of people who want the same thing agrees at once.
 
 ### 4. Round 1: independent positions

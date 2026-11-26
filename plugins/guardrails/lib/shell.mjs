@@ -291,6 +291,13 @@ export const programOf = (word) =>
     .toLowerCase()
     .replace(/\.(?:exe|cmd|bat|ps1)$/, "");
 
+/**
+ * Bash drops a backslash in front of an ordinary character: g\it runs git, and `git pu\sh`
+ * pushes. A word that looks like a Windows path (C:\tools\git.exe, .\run.cmd) is left as it is.
+ */
+export const unescaped = (word) =>
+  word.includes("\\") && !/[:/]/.test(word) && !/^(?:\\\\|\.\\|~\\)/.test(word) ? word.replace(/\\(.)/g, "$1") : word;
+
 const HOME = () => slash(os.homedir());
 
 /** Where a `cd <target>` leads from `current`. null when it cannot be known for sure. */
@@ -375,10 +382,12 @@ function walk(items, state, calls, depth, notes) {
 
     const words = [...item.words];
     let lost = state.lost; // true: git was pointed somewhere this reader cannot follow
+    const env = []; // NAME=value words in front of the program
     while (words.length) {
+      if (!state.ps) words[0] = unescaped(words[0]);
       if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
         if (MOVES_GIT.test(words[0])) lost = true;
-        words.shift();
+        env.push(words.shift());
       } else if (KEYWORDS.has(words[0])) words.shift();
       else if (PREFIXES.has(programOf(words[0]))) {
         words.shift();
@@ -388,7 +397,7 @@ function walk(items, state, calls, depth, notes) {
         }
       } else break;
     }
-    const base = { redirects: item.redirects, heredocs: item.heredocs, pipe: item.pipe };
+    const base = { redirects: item.redirects, heredocs: item.heredocs, pipe: item.pipe, env };
     if (words.length === 0) {
       if (item.redirects.length) calls.push({ program: "", word0: "", args: [], ...base, folder: state.folder });
       continue;
@@ -433,7 +442,11 @@ function walk(items, state, calls, depth, notes) {
     };
     if (SHELLS.has(program)) {
       const at = args.findIndex((arg) => /^-[a-zA-Z]*c$/.test(arg));
-      if (at !== -1 && args[at + 1] !== undefined) inner = args[at + 1];
+      // More options can follow -c (bash -c -x "...", bash -c -- "..."): the command is the first word that is not one.
+      let text = at + 1;
+      while (at !== -1 && text < args.length && args[text].startsWith("-") && args[text] !== "--") text += /^[-+]o$/.test(args[text]) ? 2 : 1;
+      if (args[text] === "--") text++;
+      if (at !== -1 && args[text] !== undefined) inner = args[text];
       else if (program !== "script" && args.every((arg) => arg.startsWith("-"))) inner = fed();
     } else if (POWERSHELLS.has(program)) {
       innerPs = true;
@@ -453,7 +466,7 @@ function walk(items, state, calls, depth, notes) {
       else {
         const text = innerPs ? inner : inner.replace(/\\\r?\n/g, "");
         const items = parse(text, 0, null, depth + 1, innerPs, notes).items;
-        walk(items, { ...state, lost, stack: [...state.stack] }, calls, depth + 1, notes);
+        walk(items, { ...state, lost, stack: [...state.stack], ps: innerPs }, calls, depth + 1, notes);
       }
       continue;
     }
@@ -485,7 +498,7 @@ export function readLine(command, cwd, options = {}) {
   const calls = [];
   const notes = { unreadable: false };
   const items = parse(text, 0, null, 0, ps, notes).items;
-  walk(items, { folder: cwd ? slash(cwd) : null, stack: [], lost: false }, calls, 0, notes);
+  walk(items, { folder: cwd ? slash(cwd) : null, stack: [], lost: false, ps }, calls, 0, notes);
   return { calls, unreadable: notes.unreadable };
 }
 
@@ -511,7 +524,9 @@ export function gitCall(call) {
     else if (!arg.startsWith("-")) break;
   }
   if (i >= args.length) return null;
-  return { folder, verb: args[i].toLowerCase(), args: args.slice(i + 1), globals, call };
+  // A verb never holds a backslash, so `pu\sh` is read the way Bash runs it. `git stage` is `git add`.
+  const verb = args[i].toLowerCase().split("\\").join("");
+  return { folder, verb: verb === "stage" ? "add" : verb, args: args.slice(i + 1), globals, call };
 }
 
 const COMMIT_SHORT_WITH_VALUE = new Set(["m", "F", "C", "c", "t"]);
@@ -520,9 +535,19 @@ const COMMIT_LONG_WITH_VALUE = new Set([
   "--fixup", "--squash", "--pathspec-from-file", "--trailer",
 ]);
 
-/** What a `git commit` asks for. The text of the message is never read as a flag. */
+/**
+ * What a `git commit` asks for. The text of the message is never read as a flag.
+ * `messages` holds the message texts written on the line, `messageFiles` the files a message is
+ * read from ("-" is the standard input). `wide` is true when the commit takes files in a way
+ * the line does not spell out (--patch, --interactive, --pathspec-from-file).
+ */
 export function readCommit(args) {
-  const commit = { all: false, noVerify: false, dryRun: false, paths: [] };
+  const commit = { all: false, noVerify: false, dryRun: false, wide: false, paths: [], messages: [], messageFiles: [] };
+  const keep = (flag, value) => {
+    if (value === undefined) return;
+    if (flag === "m" || flag === "--message") commit.messages.push(value);
+    else if (flag === "F" || flag === "--file") commit.messageFiles.push(value);
+  };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--") {
@@ -530,22 +555,26 @@ export function readCommit(args) {
       break;
     }
     if (arg.startsWith("--")) {
-      if (arg === "--all") commit.all = true;
-      else if (arg === "--no-verify") commit.noVerify = true;
-      else if (arg === "--dry-run") commit.dryRun = true;
-      else if (COMMIT_LONG_WITH_VALUE.has(arg)) i++;
+      const equals = arg.indexOf("=");
+      const name = equals === -1 ? arg : arg.slice(0, equals);
+      if (name === "--all") commit.all = true;
+      else if (name === "--no-verify") commit.noVerify = true;
+      else if (name === "--dry-run") commit.dryRun = true;
+      else if (name === "--patch" || name === "--interactive" || name === "--pathspec-from-file") commit.wide = true;
+      if (COMMIT_LONG_WITH_VALUE.has(name)) keep(name, equals === -1 ? args[++i] : arg.slice(equals + 1));
       continue;
     }
     if (arg.startsWith("-") && arg.length > 1) {
       for (let k = 1; k < arg.length; k++) {
         const flag = arg[k];
         if (COMMIT_SHORT_WITH_VALUE.has(flag)) {
-          if (k === arg.length - 1) i++;
+          keep(flag, k === arg.length - 1 ? args[++i] : arg.slice(k + 1));
           break;
         }
         if (flag === "u" || flag === "S") break; // -uno, -S<key>: the rest of the word is a value
         if (flag === "a") commit.all = true;
         else if (flag === "n") commit.noVerify = true;
+        else if (flag === "p") commit.wide = true;
       }
       continue;
     }

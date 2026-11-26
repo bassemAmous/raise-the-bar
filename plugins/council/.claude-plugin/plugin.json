@@ -1,6 +1,6 @@
 {
   "name": "council",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Decision skills where opposed viewpoints argue one question and the dissent is kept: boardroom, senior-council, strategy and red-team, with a read-only council seat agent.",
   "author": {
     "name": "bassemAmous",

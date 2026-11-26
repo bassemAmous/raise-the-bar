@@ -21,7 +21,8 @@ export function detectTestCommand(root) {
   if (has("Makefile") && /^test:/m.test(fs.readFileSync(path.join(root, "Makefile"), "utf8"))) return "make test";
   if (has("go.mod")) return "go test ./...";
   if (has("Cargo.toml")) return "cargo test";
-  if (has("pytest.ini") || has("tox.ini") || (has("pyproject.toml") && has("tests")))
+  const pythonProject = has("pyproject.toml") || has("setup.cfg") || has("setup.py");
+  if (has("pytest.ini") || has("tox.ini") || (pythonProject && (has("tests") || has("test"))))
     return windows ? "python -m pytest" : "python3 -m pytest";
   if (has("gradlew")) return windows ? "gradlew.bat test" : "./gradlew test";
   if (has("pom.xml")) return "mvn -q test";

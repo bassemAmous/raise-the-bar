@@ -13,11 +13,15 @@ const SYSTEM_FOLDERS = new Set([
   "/library", "/applications", "c:/windows", "c:/users", "c:/program files", "c:/program files (x86)",
 ]);
 
-function isRecursive(arg) {
+const UNIX_DELETERS = new Set(["rm", "rmdir"]);
+
+function isRecursive(arg, program) {
   const flag = arg.toLowerCase().replace(/:\$?true$/, ""); // PowerShell's -Recurse:$true
   if (flag === "--recursive" || flag === "/s") return true;
   if (/^-r(?:e(?:c(?:u(?:r(?:se?)?)?)?)?)?$/.test(flag)) return true; // -r, and PowerShell's -Recurse
-  return /^-[a-z]{1,3}$/.test(flag) && flag.includes("r") && !flag.startsWith("-fo");
+  // rm groups any number of short flags: -rf, -rfv, -rfvd. PowerShell's long names (-ErrorAction) are not groups.
+  const group = UNIX_DELETERS.has(program) ? /^-[a-z]+$/ : /^-[a-z]{1,3}$/;
+  return group.test(flag) && flag.includes("r") && !flag.startsWith("-fo");
 }
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -86,7 +90,7 @@ function isCatastrophic(target, call, takesHidden) {
 
 function deletesEverything(call) {
   if (!DELETERS.has(call.program)) return false;
-  if (!call.args.some(isRecursive)) return false;
+  if (!call.args.some((arg) => isRecursive(arg, call.program))) return false;
   const takesHidden = call.args.some((arg) => /^-fo(?:r(?:ce?)?)?$/i.test(arg));
   return call.args.some((arg) => !arg.startsWith("-") && !/^\/[sq]$/i.test(arg) && isCatastrophic(arg, call, takesHidden));
 }
@@ -119,6 +123,17 @@ const WIPES = [
 ];
 const matchesOneOf = (patterns) => (call) => queryText(call).some((text) => patterns.some((pattern) => pattern.test(text)));
 
+// Programs that send their text to a database. For them the short SQL forms count too:
+// TRUNCATE without the word TABLE is everyday prose anywhere else.
+const DATABASE_CLIENTS = new Set(["psql", "mysql", "mariadb", "sqlite3", "sqlcmd", "cockroach", "duckdb", "clickhouse-client"]);
+const CLIENT_WIPES = [/\btruncate\s+(?!table\b)[\w."`[\]]+/i];
+const dropsDatabase = (call) =>
+  call.program === "dropdb" ||
+  (call.program === "mysqladmin" && call.args.includes("drop")) ||
+  matchesOneOf(DROPS)(call);
+const deletesAllRows = (call) =>
+  matchesOneOf(WIPES)(call) || (DATABASE_CLIENTS.has(call.program) && matchesOneOf(CLIENT_WIPES)(call));
+
 function wipesHistory(call, git) {
   if (call.program === "git-filter-repo") return true;
   if (!git) return false;
@@ -142,10 +157,10 @@ export const DANGER_RULES = [
     test: (call, git) => skipsHooks(git),
     why: "This skips the checks that protect this repository (--no-verify, -n, or a replaced hooks folder).",
   },
-  { id: "drop-database", test: matchesOneOf(DROPS), why: "This drops a whole database." },
+  { id: "drop-database", test: dropsDatabase, why: "This drops a whole database." },
   {
     id: "delete-all-rows",
-    test: matchesOneOf(WIPES),
+    test: deletesAllRows,
     why: "This deletes or rewrites every row, with no filter.",
   },
   { id: "wipe-history", test: wipesHistory, why: "This rewrites or erases git history." },

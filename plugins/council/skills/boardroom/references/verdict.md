@@ -20,8 +20,8 @@ Seat runs: <n>
 **If this goes wrong:** <the most likely reason, in one line>
 
 Option scores: A x.x, B x.x, C x.x
-Math A: <the weighted sum, written out>
-Math B: <the weighted sum, written out>
+Math A: (<weight>x<score> + <weight>x<score> + ...) / <sum of the weights> = x.x
+Math B: (<weight>x<score> + <weight>x<score> + ...) / <sum of the weights> = x.x
 Council confidence: n/10. Spread: n. Resolution support: x.x/10 (full mode only).
 Rule applied: <ruin cap | hard-to-undo cap | constraint veto | none>, and why in one line.
 
@@ -74,6 +74,8 @@ it that way. Figures marked (assumed) are guesses, not data.
 - Every figure in the verdict must already be in the brief, a round file or the resolution. That
   is what `scripts/check-numbers.mjs` checks. A figure that is in none of them is removed, or it is
   traced in the Chair notes of a round file with its source.
+- The check also recomputes every `Math` line. Write each one as
+  `Math B: (3x6 + 2x7) / 5 = 6.4`. A wrong result, or a `Math` line in another shape, fails.
 - Write dates as `YYYY-MM-DD`. The check skips dates in that form and flags the others.
 - A figure the seats marked `(assumed)` stays marked `(assumed)` in the verdict.
 - Do not smooth the dissent. Quote it.

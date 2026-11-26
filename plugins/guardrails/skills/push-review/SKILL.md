@@ -1,6 +1,6 @@
 ---
 name: push-review
-description: Gets a commit ready for a protected branch, in the order the guard checks it. Runs the tests on the record, has a read-only reviewer who did not write the code review the diff, fixes what blocks, records the passed review, then stops for the human approval that production needs. Use when the user says "push", "ship it", "merge to main", "send it to staging", "release this", "is this ready to push", or when the guard refuses a push and lists what is missing.
+description: Gets a commit ready for a protected branch, in the order the guard checks it. Runs the tests on the record, has a read-only reviewer who did not write the code review the diff, fixes what blocks, records the passed review, then stops for the human approval that production needs. Use before a push to a protected or production branch, when the user says "ship it", "merge to main", "send it to staging", "release this" or "is this ready to push", or when the guard refuses a push and lists what is missing. Not for a push to a feature branch.
 ---
 
 # Push review
@@ -60,6 +60,11 @@ Not for a feature branch nobody deploys from: push those freely.
    OPEN-CRITICAL: 0
    OPEN-HIGH: 0
    ```
+
+   Paste the finding lines of the last review into the report, above those three lines, as the
+   reviewer wrote them. The two counts are counted from the reviewer's own finding lines. The
+   author of the code does not type them from memory and does not lower them. A Critical or High
+   finding stays open until it is fixed and reviewed again, or the reviewer withdraws it.
 
    Then run `guardrails review-stamp --report <file> --reviewer <who reviewed>`. The command
    refuses a report for another commit, a missing trailer, a FAIL, or open Critical or High

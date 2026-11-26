@@ -7,13 +7,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalFor } from "./approval.mjs";
-import { CONFIG_FILE, commitOf, loadConfig, matchesAny, repoRoot, slash, stateDir, tryGit } from "./core.mjs";
+import { CONFIG_FILE, commitOf, loadConfig, repoRoot, slash, stateDir, tryGit } from "./core.mjs";
 import { dangerIn } from "./danger.mjs";
+import { isGuarded, notReady, pushGate } from "./gate.mjs";
+import { refreshHook } from "./githook.mjs";
 import { readPush, resolveTarget } from "./push.mjs";
-import { readRecord } from "./records.mjs";
-import { ALLOW_PRAGMA, scanCommit } from "./secrets.mjs";
+import { ALLOW_PRAGMA, scanCommit, scanMessage } from "./secrets.mjs";
 import { TEXT_PROGRAMS, callsIn, gitCall, programOf, readCommit, readLine, resolveFolder, writesTo } from "./shell.mjs";
-import { testCommandFor } from "./testcommand.mjs";
 
 const PLUGIN_ROOT = slash(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
 const CLI = `node "${PLUGIN_ROOT}/cli.mjs"`;
@@ -91,6 +91,13 @@ function bringsNewText(git) {
   }
   if (git.verb === "switch") return named(git.args).length > 1;
   if (git.verb === "restore") return git.args.some((arg) => arg === "-s" || arg.startsWith("--source"));
+  if (git.verb === "reset") {
+    // `git reset other -- app.js` stages the file as it is in another commit. `git reset`,
+    // `git reset HEAD app.js` and `git reset -- app.js` only unstage.
+    const split = git.args.indexOf("--");
+    const commit = named(split === -1 ? git.args : git.args.slice(0, split))[0];
+    return commit !== undefined && commit !== "HEAD";
+  }
   return false;
 }
 
@@ -115,8 +122,9 @@ function expandAlias(call, context, depth = 0) {
   const value = inline ? inline[2] : git.folder ? context.alias(git.folder, git.verb) : null;
   if (!value) return [call];
   if (value.startsWith("!")) {
-    // A shell alias: git runs the text as a command line and adds the arguments at the end.
-    const inner = callsIn(value.slice(1), git.folder);
+    // A shell alias: git runs the text as a command line, from the top folder of the repository,
+    // and adds the arguments at the end.
+    const inner = callsIn(value.slice(1), repoRoot(git.folder) ?? git.folder);
     if (inner.length === 0) return [call];
     const last = inner[inner.length - 1];
     inner[inner.length - 1] = { ...last, args: [...last.args, ...git.args] };
@@ -137,6 +145,11 @@ const RECORD_FOLDER = /(?:^|[^\w.-])\.git[\\/](?:[^\s"']*[\\/])?guardrails(?:[\\
 // The session log is where a typed approval is read from, so the agent may read it, not write it.
 const SESSION_LOG = /[\\/]\.claude[\\/]+projects[\\/][^\s"']*\.jsonl\b/i;
 
+// git's own hooks folder holds the pre-push hook, the second check on every push (see githook.mjs).
+const PUSH_HOOK = /(?:^|[^\w.-])\.git[\\/](?:[^\s"']*[\\/])?hooks(?:[\\/]pre-push)?(?:["']|$)/i;
+// A file git reads its settings from: an alias or a push rule can be written there without `git config`.
+const GIT_SETTINGS_FILE = /(?:^|[\\/])(?:\.gitconfig|\.git[\\/]config(?:\.worktree)?|gitconfig)["']?$/i;
+
 const sameText = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 function touchesSessionLog(text, transcriptPath) {
@@ -145,10 +158,11 @@ function touchesSessionLog(text, transcriptPath) {
   return name.length > 8 && text.toLowerCase().includes(name.toLowerCase());
 }
 
-/** Which protected thing a word names: "record", "log", "config" or null. */
+/** Which protected thing a word names: "record", "hook", "log", "config" or null. */
 function kindOf(text, call, context) {
   const plain = slash(text);
   if (RECORD_FOLDER.test(plain)) return "record";
+  if (PUSH_HOOK.test(plain)) return "hook";
   if (/guardrails/i.test(plain) && call.folder) {
     // A git folder can live somewhere else. Compare with the real record folder.
     const records = context.stateDir(call.folder);
@@ -227,9 +241,57 @@ function judgeSelfProtection(calls, context) {
           `This command changes ${CONFIG_FILE}, the file that sets what the guardrails protect.`,
           "A human should confirm a change to it.",
         ]);
+      if (kind === "hook")
+        question ??= ask([
+          "This command changes git's hooks folder. The pre-push hook there is the second check on every push.",
+          "A human should confirm a change to it.",
+        ]);
     }
   }
   return question;
+}
+
+// A program named through a variable or the output of a command: $C, ${C}sh, $(echo git), `echo git`.
+const HIDDEN_PROGRAM = /^(?:\$|`)[^\\/]*$/;
+const SHIPS = /(?<![\w-])(?:git|push|commit)(?![\w-])/i;
+// Settings that switch a hook off, or hand git its config from outside the command line.
+const ENV_TRICK = /(?<![\w])(?:HUSKY\s*=\s*["']?0\b|GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM)\b|CLAUDECODE\b)/i;
+const SETS_VARIABLES = new Set(["export", "set", "declare", "typeset", "unset", "setx", "set-item", "remove-item", "si", "ri"]);
+
+/**
+ * Ways of writing a commit or a push so that the words of the line do not show it.
+ * The guard reads text, so it does not guess here: it asks for the plain form.
+ */
+function judgeDisguise(text, calls, shell) {
+  const ships = SHIPS.test(text);
+  for (const call of calls) {
+    if (!call.word0.startsWith("$") && !call.word0.startsWith("`")) continue;
+    const verb = (call.args[0] ?? "").toLowerCase();
+    const hidden = shell === "powershell" ? verb === "push" || verb === "commit" : HIDDEN_PROGRAM.test(call.word0) && ships;
+    if (hidden)
+      return deny([
+        `BLOCKED by guardrails: the program on this line is \`${call.word0}\`, a variable or the output of a command,`,
+        "and the line talks about git, a commit or a push. The guard cannot read a program it cannot see.",
+        "Write the program itself, for example: git push origin feature/x",
+      ]);
+  }
+  const shipping = calls.some((call) => ["commit", "push"].includes(gitCall(call)?.verb));
+  if (!shipping) return null;
+  // Read from the words of the command, never from the guard's own environment.
+  const settings = calls
+    .map((call) =>
+      SETS_VARIABLES.has(call.program) || /^\$env:/i.test(call.word0)
+        ? [...(call.env ?? []), call.word0, ...call.args].join(" ")
+        : (call.env ?? []).join(" "),
+    )
+    .join(" ");
+  const trick = settings.match(ENV_TRICK);
+  if (!trick) return null;
+  return deny([
+    `BLOCKED by guardrails: this line sets \`${trick[0]}\` and then commits or pushes.`,
+    "That setting can switch a check off, or change what git does, from outside the command.",
+    "Send the commit or the push without it.",
+  ]);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -297,19 +359,96 @@ function locate(git, state, what, context) {
   return state.created ? made : "skip";
 }
 
+const MAX_MESSAGE_BYTES = 1024 * 1024;
+
+/**
+ * The secrets in the message of a commit, a merge or a tag: { findings, waived }.
+ * The message goes into history like any file. `refused` holds a verdict when it cannot be read.
+ */
+function messageReport(commit, git, state, context) {
+  const said = [...commit.messages];
+  for (const name of commit.messageFiles) {
+    if (name === "-") {
+      // The message comes on the standard input: a here-document, or what an earlier part of the line prints.
+      said.push(...(git.call.heredocs.length ? git.call.heredocs : [context.text]));
+      continue;
+    }
+    let text = null;
+    try {
+      const file = state.ran ? null : resolveFolder(git.folder, name);
+      if (file && fs.statSync(file).size <= MAX_MESSAGE_BYTES) text = fs.readFileSync(file, "utf8");
+    } catch {
+      text = null;
+    }
+    if (text === null)
+      return {
+        refused: deny([
+          `BLOCKED by guardrails: the secret scan cannot read the message file "${name}".`,
+          state.ran
+            ? `On this line \`${state.ran}\` runs first and can write it, and the scan reads before the line runs.`
+            : "It is missing, too large, or named through a variable.",
+          "Write the file first. Then send this command on its own, or pass the message with -m.",
+        ]),
+      };
+    said.push(text);
+  }
+  return scanMessage(said.join("\n"));
+}
+
+/** The verdict for what a secret scan found: null, a question about waived lines, or a refusal. */
+function secretVerdict({ findings, files, waived }) {
+  if (findings.length === 0 && files.length === 0) {
+    if (waived.length === 0) return null;
+    // The agent can add the comment itself, so the comment is a question to the human, not a pass.
+    const lines = [`This commit adds ${waived.length} line(s) that look like a secret and are marked ${ALLOW_PRAGMA}:`];
+    for (const finding of waived.slice(0, 8)) lines.push(`  ${finding.file}:${finding.line}  ${finding.rule}  ${finding.shown}`);
+    lines.push("A human should confirm that none of them is a real secret.");
+    return ask(lines);
+  }
+  const lines = ["BLOCKED by guardrails: this commit would put a secret into git history.", ""];
+  for (const file of files) lines.push(`  ${file}: a secrets file should not be committed`);
+  for (const finding of findings.slice(0, 12))
+    lines.push(`  ${finding.file}:${finding.line}  ${finding.rule}  ${finding.shown}`);
+  if (findings.length > 12) lines.push(`  ... and ${findings.length - 12} more`);
+  lines.push(
+    "",
+    "Take the value out of the code or the message, and read it from the environment or a secrets store.",
+    "If the key was real, it must also be rotated: a secret that reached a commit is burned.",
+    "A false positive (a test fixture, a public example): add the comment",
+    `  ${ALLOW_PRAGMA}`,
+    "on that line, and a human is asked to confirm the commit. Or a human lists the path",
+    `under secretScan.allowPaths in ${CONFIG_FILE}.`,
+  );
+  return deny(lines);
+}
+
+/** A merge, a tag or a note with a message on the line: the message is scanned like a commit's. */
+function judgeMessage(git, state, context) {
+  const said = readCommit(git.args);
+  if (said.messages.length === 0 && said.messageFiles.length === 0) return null;
+  const config = git.folder ? context.config(git.folder) : null;
+  if (config && !config.error && !config.secretScan.enabled) return null;
+  const spoken = messageReport(said, git, state, context);
+  return spoken.refused ?? secretVerdict({ findings: spoken.findings, waived: spoken.waived, files: [] });
+}
+
 function judgeCommit(git, state, context) {
   const commit = readCommit(git.args);
   if (commit.dryRun) return null;
 
   // What the commit takes besides the files staged now: nothing, some paths, or every changed file.
+  // --patch, --interactive and --pathspec-from-file pick files the line does not name: every changed file is read.
   let scope = state.scope;
-  if (commit.all) scope = "all";
+  if (commit.all || commit.wide) scope = "all";
   else if (commit.paths.length && scope !== "all") scope = [...(scope ?? []), { folder: git.folder, paths: commit.paths }];
 
   // A repository made on this line, with nothing added to it since, has nothing staged:
-  // `git init && git commit --allow-empty -m init` can only make an empty commit.
+  // `git init && git commit --allow-empty -m init` can only make an empty commit. Its message is still read.
   const here = git.folder !== null && fs.existsSync(git.folder) && context.isRepo(git.folder);
-  if (state.created && !here && !scope && git.folder !== null) return null;
+  if (state.created && !here && !scope && git.folder !== null) {
+    const spoken = messageReport(commit, git, state, context);
+    return spoken.refused ?? secretVerdict({ findings: spoken.findings, waived: spoken.waived, files: [] });
+  }
 
   const where = locate(git, state, "commit", context);
   if (where) return where === "skip" ? null : where;
@@ -331,30 +470,13 @@ function judgeCommit(git, state, context) {
       `  ${result.error}`,
       "A commit that cannot be checked is not let through. Fix the cause, or commit in smaller parts.",
     ]);
-  const { findings, files, waived } = result;
-  if (findings.length === 0 && files.length === 0) {
-    if (waived.length === 0) return null;
-    // The agent can add the comment itself, so the comment is a question to the human, not a pass.
-    const lines = [`This commit adds ${waived.length} line(s) that look like a secret and are marked ${ALLOW_PRAGMA}:`];
-    for (const finding of waived.slice(0, 8)) lines.push(`  ${finding.file}:${finding.line}  ${finding.rule}  ${finding.shown}`);
-    lines.push("A human should confirm that none of them is a real secret.");
-    return ask(lines);
-  }
-  const lines = ["BLOCKED by guardrails: this commit would put a secret into git history.", ""];
-  for (const file of files) lines.push(`  ${file}: a secrets file should not be committed`);
-  for (const finding of findings.slice(0, 12))
-    lines.push(`  ${finding.file}:${finding.line}  ${finding.rule}  ${finding.shown}`);
-  if (findings.length > 12) lines.push(`  ... and ${findings.length - 12} more`);
-  lines.push(
-    "",
-    "Take the value out of the code and read it from the environment or a secrets store.",
-    "If the key was real, it must also be rotated: a secret that reached a commit is burned.",
-    "A false positive (a test fixture, a public example): add the comment",
-    `  ${ALLOW_PRAGMA}`,
-    "on that line, and a human is asked to confirm the commit. Or a human lists the path",
-    `under secretScan.allowPaths in ${CONFIG_FILE}.`,
-  );
-  return deny(lines);
+  const spoken = messageReport(commit, git, state, context);
+  if (spoken.refused) return spoken.refused;
+  return secretVerdict({
+    findings: [...spoken.findings, ...result.findings],
+    files: result.files,
+    waived: [...spoken.waived, ...result.waived],
+  });
 }
 
 function judgePush(git, state, context) {
@@ -364,7 +486,14 @@ function judgePush(git, state, context) {
   if (where) return where === "skip" ? null : where;
   const config = context.config(push.folder);
   if (config.error) return brokenConfig(config);
-  const guarded = [...config.protectedBranches, ...config.productionBranches];
+  refreshHook(push.folder);
+
+  if (state.rerouted)
+    return deny([
+      `BLOCKED by guardrails: this line runs \`${state.rerouted}\` and then pushes.`,
+      "That step can change where a push goes, and the guard reads git's settings before the line runs.",
+      "Run the first part. Then send the push as its own command.",
+    ]);
 
   if (push.unreadable)
     return deny([
@@ -385,7 +514,7 @@ function judgePush(git, state, context) {
   }
 
   for (const target of targets) {
-    if (!matchesAny(target.dst, guarded)) continue;
+    if (!isGuarded(target.dst, config)) continue;
 
     if (push.force || target.forced || target.deletes)
       return deny([
@@ -410,57 +539,41 @@ function judgePush(git, state, context) {
       ]);
     const { head, base, changed } = resolved;
     if (head === base) continue; // the remote branch already has this commit
-    const root = repoRoot(push.folder) ?? push.folder;
-    const codeChanged = changed === null || changed.some((file) => !matchesAny(file, config.ignorePaths));
-    const production = matchesAny(target.dst, config.productionBranches);
-    const testCommand = testCommandFor(config, root);
-
-    const gate = (required, kind, extra) => {
-      if (!required) return "not required (switched off in the config)";
-      if (!codeChanged) return "not required (docs only)";
-      if (extra) return extra;
-      return readRecord(push.folder, kind, head) ? "yes" : "NO";
-    };
-    const tests = gate(config.tests.required, "tests", testCommand ? null : "not required (no test command found)");
-    const review = gate(config.review.required, "review", null);
-    const approval = !production
-      ? null
-      : approvalFor({ cwd: push.folder, head, transcriptPath: context.transcriptPath, config })
-        ? "yes"
-        : "NO";
-    if (tests !== "NO" && review !== "NO" && approval !== "NO") continue;
-
-    const lines = [
-      `BLOCKED by guardrails: commit ${short(head)} is not ready for "${target.dst}".`,
-      "",
-      `  tests passed for this exact code: ${tests}`,
-      `  review passed for this exact code: ${review}`,
-    ];
-    if (production) lines.push(`  approved by a human: ${approval}`);
-    lines.push("", `Do these in order, from ${push.folder}:`);
-    let step = 1;
-    if (tests === "NO")
-      lines.push(
-        `  ${step++}. Run the tests through the guard, so the pass is on record:`,
-        `       guardrails test        (or: ${CLI} test)`,
-        "     Red: fix, commit, run it again. Tests run any other way leave no record.",
-      );
-    if (review === "NO")
-      lines.push(
-        `  ${step++}. Run the skill guardrails:push-review. A read-only reviewer reads the diff,`,
-        "     and the pass is recorded with:  guardrails review-stamp --report <file>",
-        "     Test before you review: a fix after the review means a second review.",
-      );
-    if (approval === "NO")
-      lines.push(
-        `  ${step++}. Production is locked until a human approves this commit. You cannot do this step.`,
-        "     Stop, say what will ship, and ask the human to send this line as a message of its own:",
-        `       ${config.approval.phrase} ${short(head)}`,
-      );
-    lines.push("", "Then send this exact push again, as its own command.");
-    return deny(lines);
+    const gate = pushGate({ folder: push.folder, head, dst: target.dst, changed, config, transcriptPath: context.transcriptPath });
+    if (gate.open) return deny(notReady({ gate, head, dst: target.dst, folder: push.folder, config, cli: CLI }));
   }
   return null;
+}
+
+const FINISHES_A_COMMIT = new Set(["rebase", "merge", "cherry-pick", "revert", "am"]);
+const CARRIES_A_MESSAGE = new Set(["merge", "tag", "notes"]);
+// Settings that change what a git word means or where a push lands.
+const ALIAS_SETTING = /^(?:\*$|alias\.|include(?:if)?\.)/;
+const ROUTE_SETTING = /^(?:\*$|alias\.|include(?:if)?\.|remote\..+\.(?:push|mirror)$|push\.|branch\.|core\.hookspath$)/;
+
+/**
+ * The setting a `git config` call writes, in lower case ("*" when it opens an editor),
+ * or null when the call only reads.
+ */
+function configWrite(git) {
+  if (git.verb !== "config") return null;
+  const words = [];
+  let writes = false;
+  for (let i = 0; i < git.args.length; i++) {
+    const arg = git.args[i];
+    if (/^(?:-l|--list|--get|--get-all|--get-regexp|--get-urlmatch|--get-color|--get-colorbool)$/.test(arg)) return null;
+    if (/^(?:-f|--file|--blob|--type|--default|--comment|--value)$/.test(arg)) i++;
+    else if (/^(?:-e|--edit)$/.test(arg)) return "*";
+    else if (/^--(?:add|unset|unset-all|replace-all|rename-section|remove-section)$/.test(arg)) writes = true;
+    else if (!arg.startsWith("-")) words.push(arg);
+  }
+  // `git config set <name> <value>`: a first word without a dot is the newer way to say what to do.
+  const action = !writes && words.length && !words[0].includes(".") ? words.shift() : null;
+  if (action === "edit") return "*";
+  if (action === "get" || action === "list") return null;
+  if (action !== null) writes = true;
+  if (words.length === 0) return null;
+  return writes || words.length >= 2 ? words[0].toLowerCase() : null;
 }
 
 const MAX_CHECKS_PER_LINE = 20;
@@ -475,6 +588,8 @@ function judgeGit(calls, context) {
     created: false, // a folder or a repository was made on this line
     switched: null, // the first earlier step that can change the current branch
     branch: null, // the branch it lands on, when the line says so
+    aliased: null, // the first earlier step that can give a git word a new meaning
+    rerouted: null, // the first earlier step that can change where a push lands
   };
   const seen = new Map();
   let question = null;
@@ -483,6 +598,13 @@ function judgeGit(calls, context) {
     if (!git) {
       if (call.program === "git") continue; // git with no command, such as git --version
       if (["mkdir", "md", "new-item", "ni"].includes(call.program)) state.created = true;
+      const targets = [...call.redirects.filter(writesTo).map((redirect) => redirect.target), ...call.args];
+      if (!READERS.has(call.program) || call.redirects.some(writesTo)) {
+        if (targets.some((target) => GIT_SETTINGS_FILE.test(slash(target)))) {
+          state.aliased ??= "a change to git's settings file";
+          state.rerouted ??= "a change to git's settings file";
+        }
+      }
       const writesText = call.redirects.some(writesTo) || !(HARMLESS.has(call.program) || WRITES_NO_TEXT.has(call.program));
       if (writesText) state.ran ??= call.program || "a redirect to a file";
       if (!HARMLESS.has(call.program)) state.moved ??= call.program || "a redirect";
@@ -493,7 +615,32 @@ function judgeGit(calls, context) {
         "BLOCKED by guardrails: the git command on this line is a variable, so the guard cannot read it.",
         "Write the command itself, for example: git push origin feature/x",
       ]);
-    if (git.verb === "commit" || git.verb === "push") {
+    if (state.aliased && !GIT_COMMANDS.has(git.verb))
+      return deny([
+        `BLOCKED by guardrails: this line runs \`${state.aliased}\` and then \`git ${git.verb}\`, a word git does not know by itself.`,
+        "It may be an alias made on this same line, and the guard reads aliases before the line runs.",
+        "Run the first part. Then send the second command on its own.",
+      ]);
+    const setting = configWrite(git);
+    if (setting !== null) {
+      if (ALIAS_SETTING.test(setting)) state.aliased ??= `git config ${setting}`;
+      if (ROUTE_SETTING.test(setting)) state.rerouted ??= `git config ${setting}`;
+      if (setting === "core.hookspath")
+        question ??= ask([
+          "This command changes core.hooksPath, the folder git runs its hooks from.",
+          "The pre-push check lives there. A human should confirm the change.",
+        ]);
+    }
+    if (git.verb === "branch" && git.args.some((arg) => /^(?:-u|--set-upstream-to)/.test(arg)))
+      state.rerouted ??= "git branch --set-upstream-to";
+    if (CARRIES_A_MESSAGE.has(git.verb)) {
+      const spoken = judgeMessage(git, state, context);
+      if (spoken?.decision === "deny") return spoken;
+      question ??= spoken;
+    }
+    // `git rebase --continue` (and merge, cherry-pick, revert, am) commits what is staged.
+    const finishes = FINISHES_A_COMMIT.has(git.verb) && git.args.includes("--continue");
+    if (git.verb === "commit" || git.verb === "push" || finishes) {
       // The same call in the same situation gets the same answer: a long line of repeats costs one check.
       const key = JSON.stringify([git.verb, git.folder, git.args, state]);
       if (!seen.has(key)) {
@@ -502,7 +649,8 @@ function judgeGit(calls, context) {
             `BLOCKED by guardrails: this line holds more than ${MAX_CHECKS_PER_LINE} different commits and pushes.`,
             "Each one is checked against the repository, and that many cannot be checked in time. Send fewer per line.",
           ]);
-        seen.set(key, git.verb === "commit" ? judgeCommit(git, state, context) : judgePush(git, state, context));
+        const asCommit = finishes ? { ...git, args: [] } : git;
+        seen.set(key, git.verb === "push" ? judgePush(git, state, context) : judgeCommit(asCommit, state, context));
       }
       const verdict = seen.get(key);
       if (verdict?.decision === "deny") return verdict;
@@ -517,6 +665,8 @@ function judgeGit(calls, context) {
     } else if (bringsNewText(git)) state.scope = "all";
     if (git.verb === "init" || git.verb === "clone") state.created = true;
     if (bringsNewText(git)) state.ran ??= `git ${git.verb}`;
+    // `git show old:.env > .env` writes a file like any other program with a redirect.
+    if (call.redirects.some(writesTo)) state.ran ??= `git ${git.verb} with a redirect to a file`;
     if (!GIT_KEEPS_HISTORY.has(git.verb) && !gitOnlyReads(git)) state.moved ??= `git ${git.verb}`;
     const lands = branchSwitch(git);
     if (lands !== undefined) {
@@ -572,6 +722,16 @@ function judgeProductionCommand(text, calls, folders, context) {
   return null;
 }
 
+/** Runs one check. When it throws, the error carries the name of the check, for the one line the hook prints. */
+function stage(name, run) {
+  try {
+    return run();
+  } catch (error) {
+    if (error && typeof error === "object") error.guardStage ??= name;
+    throw error;
+  }
+}
+
 function memo(compute) {
   const known = new Map();
   return (...args) => {
@@ -588,13 +748,14 @@ function memo(compute) {
 export function judgeCommand({ command, cwd, transcriptPath, shell }) {
   const text = String(command ?? "");
   if (!text.trim()) return ALLOW;
-  const line = readLine(text, cwd, { shell });
+  const line = stage("reading the command", () => readLine(text, cwd, { shell }));
   if (line.unreadable)
     return deny([
       "BLOCKED by guardrails: this line nests commands inside commands deeper than the guard reads.",
       "A line the guard cannot read is not let through. Send it in simpler parts.",
     ]);
   const context = {
+    text,
     transcriptPath,
     config: memo((folder) => loadConfig(folder)),
     stateDir: memo((folder) => stateDir(folder)),
@@ -606,16 +767,16 @@ export function judgeCommand({ command, cwd, transcriptPath, shell }) {
       return scanCommit(folder, { scope, adds, allowPaths: secretScan.allowPaths });
     }),
   };
-  const calls = line.calls.flatMap((call) => expandAlias(call, context));
+  const calls = stage("reading the command", () => line.calls.flatMap((call) => expandAlias(call, context)));
   const folders = [...new Set([cwd, ...calls.map((call) => call.folder)].filter(Boolean).map(slash))];
-  const configs = folders.map((folder) => context.config(folder));
+  const configs = stage("reading the config", () => folders.map((folder) => context.config(folder)));
 
   // A deny always wins over a question, so a question waits until every check has run.
-  let question = judgeSelfProtection(calls, context);
+  let question = stage("self-protection", () => judgeSelfProtection(calls, context));
   if (question?.decision === "deny") return question;
 
   if (configs.some((config) => config.dangerGuard.enabled)) {
-    const danger = dangerIn(calls);
+    const danger = stage("dangerous commands", () => dangerIn(calls));
     if (danger)
       return deny([
         `BLOCKED by guardrails (${danger.id}): ${danger.why}`,
@@ -623,12 +784,18 @@ export function judgeCommand({ command, cwd, transcriptPath, shell }) {
       ]);
   }
 
-  const verdict = judgeGit(calls, context) ?? judgeProductionCommand(text, calls, folders, context);
+  const production = () => stage("production lock", () => judgeProductionCommand(text, calls, folders, context));
+  const readable = stage("secret scan and push checks", () => judgeGit(calls, context));
+  if (readable?.decision === "deny") return readable;
+  // What the guard could read is judged first. Then the parts it cannot read.
+  const disguise = stage("reading the command", () => judgeDisguise(text, calls, shell));
+  if (disguise) return disguise;
+  const verdict = readable ?? production();
   if (verdict?.decision === "deny") return verdict;
   question ??= verdict;
   if (verdict?.decision === "ask") {
     // A question about a commit must not hide a production command further down the line.
-    const locked = judgeProductionCommand(text, calls, folders, context);
+    const locked = production();
     if (locked) return locked;
   }
 
@@ -652,6 +819,11 @@ export function judgeEdit({ filePath, transcriptPath }) {
     return deny([
       "BLOCKED by guardrails: records of tests, reviews and approvals are not edited by hand.",
       "They are written by the guardrails command, after the real thing happened.",
+    ]);
+  if (PUSH_HOOK.test(file))
+    return ask([
+      "This file is in git's hooks folder. The pre-push hook there is the second check on every push.",
+      "A human should confirm a change to it.",
     ]);
   if (sameText(path.posix.basename(file), CONFIG_FILE))
     return ask([

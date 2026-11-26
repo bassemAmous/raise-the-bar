@@ -21,6 +21,9 @@ line or a measurement, with its location.
   - a full scan where an index should apply,
   - far more rows examined than returned,
   - a single query that takes a large share of the total time.
+- A plain `EXPLAIN` only plans the statement. `EXPLAIN ANALYZE` runs it. That is fine for a
+  `SELECT`, but an `UPDATE`, `DELETE` or `INSERT` really writes. Never use `ANALYZE` on a writing
+  statement unless the user agrees and it runs inside a transaction that is rolled back.
 - List the indexes that really exist and compare them with the ones the code expects. A declared
   index is not always a created index.
 - Check the size of the tables or collections involved. A full scan is cheap on a small set and

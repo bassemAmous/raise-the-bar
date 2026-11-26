@@ -14,7 +14,7 @@ No setup. The skills find the project's own commands (tests, lint, build) from i
 | Skill | Use it when | What you get |
 | --- | --- | --- |
 | `/craft:build-it` | You have an idea and want it built properly | A short brief, a plan reviewed before any code, the smallest version that delivers the value, and proof it works |
-| `/craft:clean-code` | You want an honest read of code quality | A score out of 10, a scorecard per dimension and a ranked fix list. Fix mode applies them one commit at a time, with behaviour pinned by tests first |
+| `/craft:clean-code` | You want an honest read of code quality | A score out of 10, a scorecard per dimension and a ranked fix list. Fix mode applies them one at a time, with behaviour pinned by tests first, and commits only when you ask |
 | `/craft:performance` | Something is slow | The one slow operation pinned and measured, where the time really goes, and fixes ranked by expected gain. Read-only |
 | `/craft:bug-hunt` | You want the bugs found before users find them | Rounds of finders, a skeptic that tries to disprove every claim, root-cause fixes proven red then green, and an honest list of what was not covered |
 | `/craft:ux-review` | A screen needs a critical eye | Screenshots at phone and desktop width, findings ranked and tied to a spot on the screen, with the exact fix |
@@ -30,8 +30,10 @@ behaviour with a test, see it fail, fix, see it pass. `performance` and `ux-revi
 report, so they are safe to run at any time. `bug-retro` and `later` make sure that what was
 learned, and what was put off, is written down.
 
-Some skills mention the `guardrails` plugin from the same marketplace (an independent read-only
-reviewer, a done check). They work without it.
+The plugin brings its own reviewer agent, `craft:readonly-reviewer`. Its only tools are Read, Grep
+and Glob, so a review by it cannot change the code. Some skills also name skills from the
+`guardrails` plugin in the same marketplace (a push review, a done check). Each of those steps
+says what to do by hand when `guardrails` is not installed, so craft works without it.
 
 ## Limits
 

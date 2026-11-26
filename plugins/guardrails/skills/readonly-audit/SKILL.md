@@ -1,6 +1,6 @@
 ---
 name: readonly-audit
-description: Read-only security audit of a codebase, a feature or one endpoint. Maps what can be reached and by whom, hunts for real weaknesses, has a second agent try to disprove every finding, and returns a ranked list with evidence and the smallest fix. Changes nothing. Use when the user says "security audit", "audit this", "is this endpoint safe", "threat model", "what can an attacker reach", "check for vulnerabilities", or before opening a new surface to users.
+description: Read-only security audit of a codebase, a feature or one endpoint. Maps what can be reached and by whom, hunts for real weaknesses, has a second agent try to disprove every finding, and returns a ranked list with evidence and the smallest fix. Changes nothing. Use when the user says "security audit", "audit this", "is this endpoint safe", "threat model", "what can an attacker reach", "check for vulnerabilities", or before opening a new surface to users. Not for a review of only the pending diff (Claude Code's /security-review), or for fixing what is found.
 ---
 
 # Read-only audit
@@ -29,7 +29,10 @@ Not for style or speed. Not as a replacement for the review before a push
    service), what input it takes, what it reads and writes. Read the code for this. Do not guess
    from names.
 
-3. **Hunt by class.** Go through each entry point with these questions:
+3. **Hunt by class.** Run the hunt as one or more `guardrails:readonly-reviewer` agents (tools:
+   Read, Grep, Glob). They cannot edit a file or run a command, so for them read-only is a fact.
+   The main session can still run commands and edit, so for it read-only is a promise, kept by
+   the hard rules below. Each finder goes through each entry point with these questions:
    - Access: is the caller's identity checked, and is it checked that this caller may touch this
      record, not only that they are logged in?
    - Input: can a value reach a database query, a shell command, a file path, a template, or a

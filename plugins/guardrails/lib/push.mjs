@@ -76,12 +76,16 @@ export function readPush(git) {
       continue;
     }
     if (arg.startsWith("-") && arg.length > 1) {
-      // Short flags can be grouped: -fu is --force with --set-upstream.
-      if (arg === "-o") i++;
-      else {
-        if (arg.includes("f")) push.force = true;
-        if (arg.includes("d")) deleteMode = true;
-        if (arg.includes("n")) push.dryRun = true;
+      // Short flags can be grouped: -fu is --force with --set-upstream. After -o comes a value:
+      // -on is the push option "n", not a dry run.
+      for (let k = 1; k < arg.length; k++) {
+        if (arg[k] === "o") {
+          if (k === arg.length - 1) i++;
+          break;
+        }
+        if (arg[k] === "f") push.force = true;
+        else if (arg[k] === "d") deleteMode = true;
+        else if (arg[k] === "n") push.dryRun = true;
       }
       continue;
     }
@@ -93,7 +97,12 @@ export function readPush(git) {
   if (tryGit(["rev-parse", "--git-dir"], folder) === null) return push;
 
   const currentBranch = tryGit(["symbolic-ref", "--short", "-q", "HEAD"], folder);
-  const configured = (key) => tryGit(["config", key], folder);
+  // A setting written on the line (git -c key=value push) wins over the one in the config files.
+  const inline = (key) =>
+    git.globals
+      .filter((setting) => setting.toLowerCase().startsWith(`${key.toLowerCase()}=`))
+      .map((setting) => setting.slice(key.length + 1));
+  const configured = (key) => inline(key).pop() ?? tryGit(["config", key], folder);
   push.remote =
     positional[0] ??
     repoOption ??
@@ -131,7 +140,18 @@ export function readPush(git) {
     } else specs.push(positional[i]);
   }
 
-  const bare = !all && !matching && !current && specs.length === 0 && !tagsOnly;
+  let bare = !all && !matching && !current && specs.length === 0 && !tagsOnly;
+  if (bare) {
+    // remote.<name>.push names what a push with no branch sends: `HEAD:main` there turns a plain `git push` into a push to main.
+    const key = `remote.${push.remote}.push`;
+    const preset = [...lines(tryGit(["config", "--get-all", key], folder)), ...inline(key)];
+    for (const spec of preset) {
+      if (spec === ":" || spec === "+:" || spec.includes("*")) matching = true;
+      else specs.push(spec);
+      if (spec.startsWith("+")) push.force = true;
+    }
+    if (preset.length) bare = false;
+  }
   if (bare && mode() === "matching") matching = true; // every local branch that has a twin on the remote
   if (all || matching) {
     for (const branch of localBranches()) push.targets.push({ src: branch, dst: branch, forced: false, deletes: false });

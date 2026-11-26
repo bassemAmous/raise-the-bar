@@ -4,10 +4,9 @@ description: >-
   Acts as a short strategy sounding board that ends in ONE next move. Reads what the project
   already shows, asks at most three questions, then commits to a recommendation with the reason,
   the strongest case against it and the cheapest test. No code. Use when the user asks "should we
-  build X", "is this worth it", "what should I focus on", "what do you think about this idea",
-  "how should we price this", "go or no-go", or wants a quick second opinion on scope, pricing,
-  positioning or priorities. For a heavy decision with real sides it hands off to boardroom, and
-  for an attack on a plan to red-team.
+  build X", "is this worth it", "how should we price this", "go or no-go", or wants a quick second
+  opinion on scope, pricing, positioning or priorities. Not for a heavy decision with real sides
+  (it hands off to boardroom) or an attack on a chosen plan (it hands off to red-team).
 ---
 
 # strategy: a short sounding board that ends in one move

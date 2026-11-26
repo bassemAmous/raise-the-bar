@@ -18,7 +18,10 @@ export function readRecord(cwd, kind, ref) {
   try {
     const record = JSON.parse(fs.readFileSync(recordFile(dir, kind, tree), "utf8"));
     if (record.tree !== tree) return null;
-    if (record.expiresAt && Date.parse(record.expiresAt) < Date.now()) return null;
+    // An approval always ends. One with no end time, or a time that cannot be read, is not counted.
+    const ends = Date.parse(record.expiresAt ?? "");
+    if (kind === "approval" && !Number.isFinite(ends)) return null;
+    if (record.expiresAt && !(ends >= Date.now())) return null;
     return record;
   } catch {
     return null;

@@ -6,7 +6,8 @@ description: >-
   to fix first. Evidence first: it never invents a weakness, a competitor or a number. Use when
   the user says "red team this", "poke holes in this", "what could kill this", "play devil's
   advocate", "tear this apart", "what would an investor ask", "what am I missing", or is about to
-  send a pitch, launch a feature or commit to a plan. Advice only, no code.
+  send a pitch, launch a feature or commit to a plan. Advice only, no code. Not for code review or
+  bug hunting, and not for choosing between options (use boardroom or strategy).
 ---
 
 # red-team: attack the plan before the market does
@@ -88,8 +89,9 @@ Why: the most common competitor is the customer's current habit, and the plan ra
 
 One table. Score likelihood and impact from 1 to 5 using the evidence from the steps above.
 `score = likelihood x impact`. Tag each row: `evidenced` (data or files back it), `inferred`
-(sound reasoning, not checked) or `speculative` (could go either way). A threat is **critical**
-when its score is 16 or more, or when nothing in the plan answers it today.
+(sound reasoning, not checked) or `speculative` (could go either way). A threat is **serious**
+when its score is 16 or more, or when nothing in the plan answers it today. Name at most three of
+the serious threats **critical**, the highest scores first. List the rest as serious.
 Why: a ranked list tells the user where to spend the next hour. A flat list of twenty worries
 tells them nothing.
 
@@ -123,7 +125,8 @@ What a competitor would do
 
 Threat register
 | Threat | Likelihood | Impact | Score | Basis | Fix or stop rule |
-Critical: <the one to three threats that could end the plan>
+Critical: <at most three serious threats, the highest scores first, or "none">
+Serious: <the other serious threats, or "none">
 
 Fix first
 1. <fix>: answers <threat>. Test: <cheapest check>.
@@ -156,6 +159,36 @@ threat because the user seems attached to the plan.
 ## For a large plan: three attackers in parallel
 
 For a long pitch or a full plan, you may run steps 3, 4 and 5 as three agents in one message, each
-as `council:council-seat` on the strongest model you have. Give each one the target, the evidence
-notes and its step as its seat definition. Each returns its section of the output format, with a
-source for every claim. You write steps 6 and 7 yourself, and you say three agent runs were used.
+as `council:council-seat` on the strongest model you have.
+
+A seat can only read files. It has no web tools. The web lookup of step 5 stays with you, in the
+main session. Do it before you spawn the seats and put what you found, with its sources, in the
+brief.
+
+The seat agent stops when its prompt has no seat block or no brief. Give each attacker a prompt in
+this shape, with the parts in square brackets replaced:
+
+```
+RED TEAM: [OBJECTIONS | PRE-MORTEM | COMPETITOR]
+
+You hold the [objections | pre-mortem | competitor] seat. You only read.
+
+SEAT BLOCK
+- Question it owns: [the question of this step, in one line]
+- Lens: [the text of this step, pasted whole]
+- Reads: [the plan and the files the evidence notes name]
+- Natural opponents: the author of the plan.
+- Where the lens misfires: it attacks a claim the plan never made, or a weakness with no evidence.
+
+THE BRIEF
+[the three lines from step 1, the evidence notes from step 2, and any web facts with their sources]
+
+Answer in exactly this shape:
+[this step's section of the output format]
+
+Rules: every claim has a source (the plan, a file you name, the brief), or is marked (assumed).
+Never invent a weakness, a competitor, a figure or a quote.
+```
+
+Each returns its section of the output format. You write steps 6 and 7 yourself, and you say three
+agent runs were used.

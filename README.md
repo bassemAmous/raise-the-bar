@@ -57,12 +57,13 @@ Hooks that run before the agent's commands. They do not ask the agent to behave;
 | Rule | What it stops |
 | --- | --- |
 | Secret scan | A commit that adds an API key, a private key, a password in a URL, or a `.env` file |
-| Tests on record | A push to a protected branch when the tests did not pass on that exact code |
+| Tests on record | A push to a protected branch when the tests did not pass on that exact code, or when no test command is set at all |
 | Review on record | A push to a protected branch with no passed review of that exact code |
 | Production lock | A push or deploy to production until a human approves that one commit |
 | Forward-only history | Force-push to, or deletion of, a protected branch |
 | Danger guard | `rm -rf` on root, home or `.git`, `--no-verify`, drop database, delete without a filter |
-| Self-protection | The agent approving its own work, forging a record, or quietly editing the rules |
+| Self-protection | The agent approving its own work, writing into the record folder, or quietly editing the rules |
+| Second check by git | A push the command reader could not see. With `guardrails install-hook`, git's own pre-push hook asks again, with the commit and the branch it really sends |
 
 Also in the plugin: the skills `push-review`, `done-check` and `readonly-audit`, and a reviewer
 agent that has no tools that write, so a review cannot change the code it reviews.
@@ -73,7 +74,7 @@ agent that has no tools that write, so a review cannot change the code it review
 
 **How the work gets done.**
 
-Eight skills for everyday engineering.
+Eight skills for everyday engineering, and a reviewer agent that can only read.
 
 | Skill | What it does |
 | --- | --- |
@@ -129,18 +130,28 @@ config file with no project-specific rules.
 - The hook judges a command before it runs. So a push to a protected branch has to be sent as
   its own command, not chained after the commit that creates the code, and a commit is not
   chained after a step that writes files. The guard says so, and says what to send instead.
+- Reading a command line is best effort. The second check (git's own pre-push hook, added with
+  one command) sees the push whatever the line looked like. A merge made on the server passes
+  through neither.
 - A test pass is recorded by the tool that ran the tests. A review pass is recorded from a report
-  the agent hands in. The first is hard to fake; the second is kept for a person to read.
+  the agent hands in, kept for a person to read. Both are plain files on the machine, not
+  signatures.
 - The secret scan knows common key formats. It is not a replacement for a full scanner in CI.
 - Skills are instructions a model follows. They raise the floor; they do not guarantee a result.
 
 ## Development
 
 ```
-node --test plugins/guardrails/tests/guardrails.test.mjs   # 32 tests on real temporary git repositories
+node --test plugins/guardrails/tests/guardrails.test.mjs   # 40 tests on real temporary git repositories
+node --test plugins/council/skills/boardroom/scripts/check-numbers.test.mjs
+node scripts/check-repo.mjs                                 # skill descriptions, versions, the marketplace file
 claude plugin validate .                                    # the marketplace file
 claude plugin validate plugins/guardrails                   # each plugin
 ```
+
+A change to a plugin needs a new `version` in its `plugin.json`. Without one, people who already
+installed the plugin keep the old copy. CI checks this on every pull request. See
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Acknowledgements
 

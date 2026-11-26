@@ -19,7 +19,8 @@ the exact fix. The skill is read-only unless the user asks for the fixes.
 ## When not to use
 
 - Nothing can be rendered. Start the app first. An app with no data looks broken, not badly
-  designed, so load some sample data too.
+  designed, so it needs sample data. Ask the user before loading any data, and never run a seed
+  script on your own. Seed scripts often empty tables first.
 - The question is about code structure (`clean-code`) or speed (`performance`).
 - The user wants new feature ideas. That is a product conversation, not a review.
 
@@ -57,7 +58,7 @@ screen again, not only the spot you changed, because a fix can move the problem.
 
 **Several screens:** one helper agent per screen can capture and review it. Each returns its
 screenshot paths, its findings in the format below, and its first-glance result. A helper that
-only reviews should be read-only, for example `guardrails:readonly-reviewer`. Mechanical checks
+only reviews should be read-only, for example `craft:readonly-reviewer`. Mechanical checks
 (contrast, target sizes, focus order) suit a cheaper, faster model. The ranking across screens and
 the overall judgment stay with the main session, on the strongest model you have. When reviewing
 fixes, the reviewer must not be the agent that made them.

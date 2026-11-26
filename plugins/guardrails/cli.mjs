@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // The guardrails command: runs the tests on the record, records a passed review, takes a
-// human approval, and shows what a commit still needs.
+// human approval, shows what a commit still needs, and is what git's pre-push hook calls.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { CONFIG_FILE, DEFAULTS, commitOf, loadConfig, repoRoot, stateDir, tryGit } from "./lib/core.mjs";
+import { CONFIG_FILE, DEFAULTS, commitOf, loadConfig, readStdin, repoRoot, stateDir, tryGit } from "./lib/core.mjs";
+import { isGuarded, notReady, pushGate } from "./lib/gate.mjs";
+import { CLI_FILE, hookState, installHook } from "./lib/githook.mjs";
 import { judgeCommand } from "./lib/judge.mjs";
 import { readRecord, reviewTrailer, writeRecord } from "./lib/records.mjs";
 import { detectTestCommand, testCommandFor } from "./lib/testcommand.mjs";
@@ -18,6 +20,7 @@ const USAGE = `guardrails <command>
   approve                        human only, in a real terminal: approve this commit for production
   check "<shell command>"        show what the guard would say to a command, without running it
   init                           write ${CONFIG_FILE} with the defaults for this repository
+  install-hook                   add git's own pre-push hook: git checks every push a second time
 
 Options: --head <ref> (default HEAD) for status, review-stamp and approve.
 `;
@@ -64,14 +67,23 @@ function status() {
       ...(config.error ? [`config PROBLEM    ${config.error}`] : []),
       `protected         ${config.protectedBranches.join(", ")}`,
       `production        ${config.productionBranches.join(", ") || "(none)"}`,
-      `test command      ${testCommand ?? "(none found: the test gate is off)"}`,
+      `test command      ${testCommand ?? (config.tests.required ? NO_TEST_COMMAND : "(none: tests are switched off in the config)")}`,
       `tests passed      ${mark(tests)}`,
       `review passed     ${mark(review)}`,
-      `terminal approval ${mark(approval)}`,
+      `human approval    ${mark(approval)}`,
+      `pre-push hook     ${HOOK_STATES[hookState(cwd)]}`,
       "",
     ].join("\n"),
   );
 }
+
+const NO_TEST_COMMAND = "(none found: a push of code to a protected branch is refused until one is set)";
+const HOOK_STATES = {
+  current: "installed (git checks every push a second time)",
+  stale: "written by another copy of the plugin: run guardrails install-hook",
+  other: "another tool's hook is there: run guardrails install-hook to see the line to add",
+  none: "not installed: run guardrails install-hook",
+};
 
 function runTests() {
   const root = needRepo();
@@ -180,9 +192,98 @@ function init() {
   const config = { ...defaults, tests: { ...defaults.tests, command: detectTestCommand(root) }, onGuardError };
   fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   process.stdout.write(`guardrails: wrote ${file}\nEdit the branch lists and add your deploy commands under productionCommands.\n`);
+  if (!config.tests.command)
+    process.stdout.write(
+      'No test command was found. Set "tests": { "command": "..." }, or "tests": { "required": false } for a project without tests.\n',
+    );
+  process.stdout.write("Next: guardrails install-hook, so that git itself checks every push a second time.\n");
 }
 
-const commands = { status, test: runTests, "review-stamp": reviewStamp, approve, check, init };
+function installPushHook() {
+  needRepo();
+  try {
+    const file = installHook(cwd);
+    process.stdout.write(
+      `guardrails: wrote ${file}\n` +
+        "git now runs the push checks itself, with the commit and the branch it really sends.\n" +
+        "To remove it, delete that file.\n",
+    );
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
+const ZERO = /^0+$/;
+
+/**
+ * Called by git's pre-push hook: `gate --terminal <0|1> <remote> <url>`, with one line per
+ * branch on the standard input: <local ref> <local commit> <remote ref> <remote commit>.
+ * Exit 0 lets the push go. Exit 1 stops it.
+ */
+async function gate() {
+  const at = rest.indexOf("--terminal");
+  // A person at their own terminal decides for themselves. An agent's shell has no terminal.
+  // The hook says which it is. A hook of another tool that calls `gate` with no flag leaves it to node.
+  const atTerminal = at === -1 ? Boolean(process.stderr.isTTY) : rest[at + 1] === "1";
+  const person = atTerminal && !process.env.CLAUDECODE;
+  const stop = (lines) => {
+    if (person) {
+      const what = lines[0].replace(/^BLOCKED by guardrails: /, "");
+      process.stderr.write(`guardrails: note: ${what} You are at a terminal, so it is your call.\n`);
+      return;
+    }
+    process.stderr.write(`${lines.join("\n")}\n`);
+    process.exit(1);
+  };
+  const root = repoRoot(cwd);
+  if (!root) return;
+  try {
+    await gateRows(root, stop);
+  } catch (error) {
+    // A check that failed has not passed. One line says so, and a person is not locked out by it.
+    stop([`BLOCKED by guardrails: the push check failed (${error?.message ?? error}), so this push was not checked.`]);
+  }
+}
+
+async function gateRows(root, stop) {
+  const config = loadConfig(cwd);
+  if (config.error) return stop([`BLOCKED by guardrails: ${config.file ?? CONFIG_FILE} has a problem: ${config.error}`]);
+  const rows = (await readStdin())
+    .split("\n")
+    .map((row) => row.trim().split(/\s+/))
+    .filter((row) => row.length >= 4);
+  for (const [, head, remoteRef, base] of rows) {
+    if (!remoteRef.startsWith("refs/heads/")) continue;
+    const dst = remoteRef.slice("refs/heads/".length);
+    if (!isGuarded(dst, config)) continue;
+    const forward = ZERO.test(base) || spawnSync("git", ["merge-base", "--is-ancestor", base, head], { cwd }).status === 0;
+    if (ZERO.test(head) || !forward) {
+      stop([
+        `BLOCKED by guardrails: this would rewrite or delete the protected branch "${dst}".`,
+        "History on a protected branch only moves forward. Push a new commit that fixes or reverts.",
+      ]);
+      continue;
+    }
+    if (head === base) continue;
+    const names = ZERO.test(base)
+      ? null
+      : tryGit(["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", base, head], cwd);
+    const changed = names === null ? null : names.split("\n").filter(Boolean);
+    const state = pushGate({ folder: cwd, head, dst, changed, config });
+    if (state.open) stop(notReady({ gate: state, head, dst, folder: root, config, cli: `node "${CLI_FILE}"` }));
+  }
+}
+
+const commands = {
+  status,
+  test: runTests,
+  "review-stamp": reviewStamp,
+  approve,
+  check,
+  init,
+  "install-hook": installPushHook,
+  gate,
+};
 if (!command || !commands[command]) {
   process.stdout.write(USAGE);
   process.exit(command ? 1 : 0);

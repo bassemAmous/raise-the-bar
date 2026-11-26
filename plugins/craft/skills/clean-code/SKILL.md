@@ -1,6 +1,6 @@
 ---
 name: clean-code
-description: Holds code to a senior readability bar, in two modes. Grade mode reads the code and reports a score out of 10, a scorecard per dimension and a ranked list of fixes, and edits nothing. Fix mode applies those fixes in a worktree with behaviour pinned by tests first. Use when the user says "review my code", "is this clean", "grade this module", "senior review" or "check code quality" (grade), or "clean this up", "refactor this" or "tidy this file" (fix). Not for finding bugs (bug-hunt), speed (performance) or screens (ux-review).
+description: Holds code to a senior readability bar, in two modes. Grade mode reads the code and reports a score out of 10, a scorecard per dimension and a ranked list of fixes, and edits nothing. Fix mode applies those fixes in a worktree with behaviour pinned by tests first. Use when the user says "is this clean", "grade this module" or "check code quality" (grade), or "clean this up", "refactor this" or "tidy this file" (fix). Not for finding bugs (bug-hunt), a bug review of a diff (Claude Code's /code-review), speed (performance) or screens (ux-review).
 ---
 
 # clean-code
@@ -44,7 +44,7 @@ modes cite live in `references/rules.md`.
 7. **Confirm nothing changed.** Run `git status`. It must match the state before the run.
 
 For a large target, helper agents can each read one area. Use a read-only agent such as
-`guardrails:readonly-reviewer`. Each returns findings as `path:line`, rule id, fix, and a list of
+`craft:readonly-reviewer`. Each returns findings as `path:line`, rule id, fix, and a list of
 what it read. The final score stays with the main session, on the strongest model you have. No
 helper grades from counts alone.
 
@@ -68,9 +68,12 @@ helper grades from counts alone.
 7. **Prove it.** Type check clean, the full test suite green, the counts lower than the baseline.
    Tests must pass on the base and on the result, so a failure can be traced to the cleanup or
    cleared of it.
-8. **Keep each fix separate.** One small commit per fix on the worktree branch, the rule id in the
-   message, so any one of them can be reverted alone. Do not push or merge. That is the user's
-   call, through `guardrails:push-review`.
+8. **Keep each fix separate.** Commit only when the user asked for commits. Then make one small
+   commit per fix on the worktree branch, the rule id in the message, so any one of them can be
+   reverted alone. Otherwise leave the changes in the worktree and list them by rule id. Do not
+   push or merge. That is the user's call, through `guardrails:push-review`. If the guardrails
+   plugin is not installed, the checks run on the exact commit and `craft:readonly-reviewer`
+   reads the diff before a push.
 
 ## Output format
 
@@ -81,7 +84,7 @@ Target: <what was graded> (<full read | sampled: which files>)
 Score: <n>/10
 Why: <three lines>
 
-Scorecard (0 to 10, with the count behind it)
+Scorecard (1 to 10, with the count behind it)
   naming <n> | functions <n> | comments <n> | duplication <n> | errors <n>
   boundaries <n> | security hygiene <n> | tests <n> | newcomer test <n> (counted twice)
 
@@ -95,8 +98,9 @@ Not read: <what was skipped>
 Changed: nothing (git status matches the start)
 ```
 
-Score formula, so two runs agree: the mean of the scorecard with the newcomer test counted twice.
-A critical security finding caps the score at 5.
+Score formula, so two runs agree. Each dimension starts at 10. Each Critical finding in it takes
+off 3, each Major 2 and each Minor 1. No dimension goes below 1. The score is the mean of the
+scorecard with the newcomer test counted twice. A critical security finding caps the score at 5.
 
 Fix mode:
 
@@ -104,6 +108,7 @@ Fix mode:
 Fixed: <count> findings in <count> files, by rule id
 Baseline -> result: tests <a> passed -> <b> passed | counts <before> -> <after>
 Commands run: <each command and its result>
+Commits: <one per fix, listed | none, changes left in the worktree: <files>>
 Left alone: <findings not fixed, with the reason>
 Inherited failures: <tests that already failed on the base, or "none">
 ```

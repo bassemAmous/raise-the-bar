@@ -2,10 +2,10 @@
 name: council-seat
 description: >-
   One seat on a council: a single point of view on ONE decision, spawned by the Chair of the
-  boardroom or senior-council skill. Read-only at the tool level. The Chair's prompt supplies the
-  seat definition (the question the seat owns, its lens, its natural opponents, where its lens
-  misfires), the brief, and the exact shape of the answer. Not for code work and not for general
-  questions.
+  boardroom or senior-council skill, or by the red-team skill for its parallel attackers.
+  Read-only at the tool level. The Chair's prompt supplies the seat definition (the question the
+  seat owns, its lens, its natural opponents, where its lens misfires), the brief, and the exact
+  shape of the answer. Not for code work and not for general questions.
 tools: Read, Grep, Glob
 maxTurns: 12
 ---

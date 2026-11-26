@@ -5,14 +5,21 @@
 A worktree is finished when its change has been promoted, or abandoned on purpose. Before removing
 it, run these checks. Each one guards against a loss that a plain "is it clean" check misses.
 
-1. **Every commit exists somewhere else.**
+First check that nobody is using it. Run `git worktree list --porcelain` and skip every worktree
+marked `locked`. For a worktree this session did not create, ask the user whether another session
+still works there.
+
+1. **Every commit is on a remote or on a branch that stays.**
 
    ```
    git -C <worktree> rev-list --count HEAD --not --remotes
    ```
 
-   The result must be `0`: every commit is on a remote. If it is not, push the branch, or keep it
-   with a tag, before removing anything.
+   A result of `0` means every commit is on a remote. If it is not `0`, the commits are on this
+   machine only. Removing a worktree keeps its branch, so no push is needed. Check that the
+   branch still exists: `git -C <worktree> branch --show-current` must print a name. If it prints
+   nothing, the worktree is on no branch, so create one first (`git -C <worktree> branch
+   <name>`). Cleanup never pushes. If the work must leave the machine, ask the user.
 2. **No uncommitted work.** `git -C <worktree> status --porcelain` must be empty.
 3. **No ignored file that exists only here.** `git status` does not list ignored files, and
    removing the worktree deletes them with it. List them:
@@ -59,12 +66,16 @@ git -C <repo> branch backup/pre-sync-<date> <base-branch>
 git -C <repo> status --porcelain
 ```
 
-If there are no local changes, fast-forward with `git -C <repo> merge --ff-only
-origin/<base-branch>`. If there are local changes, they belong to someone. Ask before moving them.
-If the update stops because untracked files would be overwritten, do not force it. Compare each
-blocking file with the incoming version (`git hash-object <file>` against `git rev-parse
-origin/<base-branch>:<file>`). If they are identical, the local copy is a leftover. If they
-differ, copy the local file outside the repository before deciding.
+If there are local changes, they belong to someone. Ask before moving them. If there are none,
+check which branch is checked out: `git -C <repo> branch --show-current` must print
+`<base-branch>`. The merge moves whatever branch is checked out, so on another branch, stop and
+ask. Then fast-forward with `git -C <repo> merge --ff-only --no-overwrite-ignore
+origin/<base-branch>`. Without `--no-overwrite-ignore`, git replaces an ignored local file with
+no warning when the update brings a tracked file at the same path, and `git status` does not list
+ignored files. If the update stops because untracked or ignored files would be overwritten, do
+not force it. Compare each blocking file with the incoming version (`git hash-object <file>`
+against `git rev-parse origin/<base-branch>:<file>`). If they are identical, the local copy is a
+leftover. If they differ, copy the local file outside the repository before deciding.
 
 **A stale checkout gives wrong answers.** A comparison such as "what differs between these two
 branches" is true only at the moment of the fetch. Fetch right before any measurement you will act

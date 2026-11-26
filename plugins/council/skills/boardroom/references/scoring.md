@@ -14,6 +14,9 @@ Show the math for each option on its own line in the verdict, starting with the 
 
 `Math B: (3x6 + 2x7 + 2x8 + 2x6) / 9 = 6.7`
 
+Keep that exact shape: each term is weight x score, then the sum of the weights, then the result.
+The number check recomputes every `Math` line and fails the verdict when one does not add up.
+
 A tie within 0.2 is a tie. Say so, and recommend the option that is easier to undo.
 
 ## Labels (from the recommended option's score)
@@ -37,11 +40,14 @@ Never round a score up to reach a better label.
 
 ## Overrides (applied after the label, and named in the verdict)
 
-1. **Ruin cap.** If any seat marks `RUIN RISK: likely` on the recommended option, the label cannot
-   be higher than REWORK until the resolution names a mitigation that the same seat endorsed. One
-   seat that sees ruin outweighs six keen seats.
-2. **Hard-to-undo cap.** If most seats mark the recommended option `UNDO: no`, or the `bet` seat
-   does, and the spread is 4 or more, the label cannot be higher than GO WITH CONDITIONS. The
+Every card gives `RUIN RISK` and `UNDO` for every option. For the first two caps, read the
+recommended option's value on every card, including the cards of seats that back another option.
+
+1. **Ruin cap.** If any seat marks the recommended option `likely` under `RUIN RISK`, the label
+   cannot be higher than REWORK until the resolution names a mitigation that the same seat
+   endorsed. One seat that sees ruin outweighs six keen seats.
+2. **Hard-to-undo cap.** If most seats mark the recommended option `no` under `UNDO`, or the `bet`
+   seat does, and the spread is 4 or more, the label cannot be higher than GO WITH CONDITIONS. The
    cheapest test becomes a condition that comes first.
 3. **Constraint veto.** The brief may list up to three hard constraints. If a seat shows, with a
    source, that the recommended option breaks one, the option is out as written, whatever its
@@ -70,8 +76,10 @@ not measure whether the idea is good.
 ## The scorecard
 
 One row per seat in the verdict's seat table, with its final own-lens score: the seat's judgment
-of the recommended option on its own dimension alone. Any own-lens score of 4 or below gets a
-named fix under "Next", even when the label is GO.
+of the recommended option on its own dimension alone. Every card gives an own-lens score for
+every option, so read the recommended option's value, also on the card of a seat that backs
+another option. Any own-lens score of 4 or below gets a named fix under "Next", even when the
+label is GO.
 
 | Seat      | Dimension                            |
 | --------- | ------------------------------------ |
@@ -106,6 +114,6 @@ with two months free. B, keep monthly only. Quick mode, four seats.
 
 A is recommended at 7.4, so the label is GO WITH CONDITIONS. The spread on A is 8 minus 5, which
 is 3. Council confidence is the average of 4, 3, 4 and 4, which is 3.75, times 2, rounded: 8 out
-of 10. No seat marked ruin risk, so no override applies. Say the `delivery` seat gave an own-lens
-score of 5. That is above the line of 4, so it needs no named fix, but its condition (billing
-changes tested on a copy first) still goes into the conditions.
+of 10. No seat marked A `likely` under `RUIN RISK`, so no override applies. Say the `delivery` seat
+gave A an own-lens score of 5. That is above the line of 4, so it needs no named fix, but its
+condition (billing changes tested on a copy first) still goes into the conditions.

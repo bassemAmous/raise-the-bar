@@ -9,7 +9,8 @@ protected branches only get code that was tested and reviewed, and production wa
 ```
 
 It works with no setup. To fit it to your project, run `guardrails init` in the repository and
-edit the file it writes.
+edit the file it writes. Then run `guardrails install-hook` once: git itself then checks every
+push a second time, however the command was written.
 
 ## What happens on a push
 
@@ -57,6 +58,25 @@ that step alone:
 | `bash -c "git push origin main"`, `(git push origin main)`, `git push origin main > log 2>&1` | Read as the push it is. |
 | `echo "then git push origin main"`, a commit message or a `gh pr create --body` that mentions a push | Text, not a command. Allowed. |
 
+## Two checks on a push
+
+1. **Before the command runs.** The hook reads the command line and refuses a push that is not
+   ready. It reads text, so it has blind spots: a push started by another program, or a line
+   written so that its words do not show a push.
+2. **When git sends.** `guardrails install-hook` adds git's own `pre-push` hook to the
+   repository. git runs it with the commit and the branch it is really sending, after the shell,
+   the aliases and the git settings have done their work. The same checks run again there: tests
+   on record, review on record, the approval for production, forward-only history.
+
+The second check is for the agent, not for you. In an agent's shell there is no terminal, so a
+push that is not ready is refused. At your own terminal it prints a one-line note and lets the
+push go: it is your call.
+
+The hook is one file in the repository's hooks folder. It is never committed, a fresh clone does
+not have it, and deleting the file removes it. A `pre-push` hook from another tool is never
+replaced: the command prints the one line to add to it. After a plugin update the guard writes
+its hook again by itself.
+
 ## How the records work
 
 - A record is a small file under `.git/guardrails/`. It is never committed and never pushed.
@@ -78,6 +98,9 @@ that step alone:
 - A change that only touches paths in `ignorePaths` (docs by default) needs no tests and no
   review. The message then says `not required (docs only)`, never `yes`. Production still needs
   the approval.
+- A check that cannot run has not passed. With no test command (none in the config, none found
+  in the project), a push of code to a protected branch is refused, and the message says what to
+  set. A project without tests says so on purpose: `"tests": { "required": false }`.
 
 ## How the approval works
 
@@ -93,9 +116,13 @@ Two ways, both need a person:
 2. **In your own terminal.** Run `guardrails approve`. It needs a real terminal and asks you to
    type the commit id. An agent's shell is not a terminal, so the command refuses there.
 
+A typed approval that lets a push through is also kept as a record, with the same end time, so
+that git's own hook can read it.
+
 The agent is also refused when it tries to run `guardrails approve`, to write under
 `.git/guardrails/` or to the session log, and it must ask you before changing
-`guardrails.config.json`. Reading any of them is always allowed.
+`guardrails.config.json`, git's hooks folder or `core.hooksPath`. Reading any of them is always
+allowed.
 
 Commands listed under `productionCommands` (a deploy script, for example) use the same line. In
 a repository the approval names the current commit and opens those commands until it expires.
@@ -106,12 +133,13 @@ counts for 10 minutes.
 
 | Command | What it does |
 | --- | --- |
-| `guardrails status` | What the current commit has on record, and any problem in the config file |
+| `guardrails status` | What the current commit has on record, whether the pre-push hook is installed, and any problem in the config file |
 | `guardrails test` | Runs the tests and records a pass for this exact code |
 | `guardrails review-stamp --report <file>` | Records a passed review |
 | `guardrails approve` | Human only, real terminal: approve this commit for production |
 | `guardrails check "<command>"` | Shows what the guard would say, without running anything |
 | `guardrails init` | Writes `guardrails.config.json` with the defaults |
+| `guardrails install-hook` | Adds git's own `pre-push` hook, the second check on every push |
 
 The `guardrails` command is on the agent's path while the plugin is enabled. In your own terminal
 use `node <plugin folder>/cli.mjs`.
@@ -129,12 +157,12 @@ use `node <plugin folder>/cli.mjs`.
 | `ignorePaths` | `**/*.md`, `docs/**`, `LICENSE`, `.gitignore` | Changes only here skip tests and review |
 | `tests.command` | detected for npm, pnpm, yarn, bun, make, Go, Cargo, pytest, Gradle and Maven | The command that must pass |
 | `tests.allowUntracked` | `false` | Let `guardrails test` run with new files git does not know |
-| `tests.required`, `review.required` | `true` | Turn a check off |
+| `tests.required`, `review.required` | `true` | Turn a check off. With `tests.required` on and no test command, a push of code to a protected branch is refused |
 | `approval.phrase` | `approve production` | The words the human types |
 | `approval.maxAgeMinutes` | `60` | How long a typed approval counts |
 | `secretScan.allowPaths` | none | Paths the secret scan skips, for example test fixtures |
 | `dangerGuard.enabled` | `true` | The destructive-command guard |
-| `onGuardError` | `allow` | What to do if the guard itself crashes: `allow` or `deny` |
+| `onGuardError` | `allow` | What to do when the guard itself fails on a line that cannot commit, push or deploy: `allow` or `deny`. A line that can is always refused |
 
 For one line that looks like a secret and is not, add the comment `guardrails:allow-secret` on
 that line. The agent can write that comment too, so it does not pass alone: the commit then
@@ -162,22 +190,40 @@ is fixed, and `guardrails status` shows the problem.
   approve, write a record or write the session log), but an agent that sets out to cheat on a
   machine it controls can still find one. Keep branch protection and deploy permissions on the
   server side as the real lock.
+- **A record is a plain file, not a signature.** The guard refuses the agent's commands and edits
+  that name the record folder, but it reads text: a path put together from a variable is not
+  seen. A record tells someone who trusts the machine that a step ran. It does not prove it to
+  anyone else.
+- **Reading a command line is best effort.** The first check reads Bash and PowerShell text. A
+  push started by another program (an IDE button, a script the agent wrote and ran, `xargs`), or
+  a line written so that its words hide the push, is not seen there. The second check is for
+  that: run `guardrails install-hook`. A merge made on the server (`gh pr merge`, a merge button)
+  passes through neither check. Branch protection on the server is the lock for those.
+- **The second check is a local file.** The agent is asked before it changes git's hooks folder
+  or `core.hooksPath`, and `--no-verify` is refused. A fresh clone, or a machine where nobody ran
+  `guardrails install-hook`, does not have it. `guardrails status` shows whether it is installed.
+  It tells a person from an agent by the terminal and by the `CLAUDECODE` variable of the agent's
+  shell. A program that fakes both passes as a person.
 - **The test record is strong, the review record is weaker.** A test pass is written by the tool
   that ran the tests. A review pass is written from a report the agent hands in: the guard checks
   that the report names the commit and ends with a pass, and keeps it for you to read. It cannot
   check that the review was good.
 - **One approval is a window, not a single use.** Until it expires, it covers every push of that
   commit and every command in `productionCommands`. Set `maxAgeMinutes` low if that is too wide.
-- The guard reads commands for Bash and PowerShell. A push made by another program (an IDE
-  button, a script the agent wrote and ran, `xargs`, `gh pr merge`) is not seen.
-- A push whose target is a shell variable cannot be read, so it is refused. Write the branch name.
+- A push whose target is a shell variable cannot be read, so it is refused. Write the branch
+  name. The same goes for a program named through a variable on a line that talks about git, and
+  for an alias or a push setting made on the same line as the push: send them in two parts.
 - Only `git push` is read as a push. `git send-pack` and `git subtree push` are not, and a
   remote-tracking ref moved by hand (`git update-ref`) can make a commit look already pushed.
 - A line is judged before it runs. A commit that takes files from disk after a step that can
   write files is refused, even when that step is harmless: send it in two parts. A line that
   nests commands deeper than 12 levels, or holds more than 20 commits and pushes, is refused too.
-- Commits that git makes for you are not scanned: the end of a merge, a rebase or a cherry-pick
-  (`--continue`). The push check still applies to them.
+- The end of a merge, a rebase or a cherry-pick (`--continue`) is scanned for what is staged at
+  that moment, and so is the text of a commit message. The commits git replays by itself in the
+  middle of a rebase are not read again.
+- When the guard itself fails (a crash, or a git that does not answer in time), a line that can
+  commit, push or deploy is refused, and one line on stderr says which check failed. Any other
+  line goes through, so a bug in the guard never blocks `ls`.
 - The destructive-command guard names a few catastrophes: the disk, the home folder, a system
   folder, the repository you are in, a dropped database, a delete with no filter. It does not
   follow `find -delete`, `git clean`, a delete piped from a listing, or a path held in a variable.
@@ -193,10 +239,11 @@ is fixed, and `guardrails status` shows the problem.
 node --test plugins/guardrails/tests/guardrails.test.mjs
 ```
 
-32 tests. Each one builds a real temporary git repository with a real remote and runs the guard
+40 tests. Each one builds a real temporary git repository with a real remote and runs the guard
 against it: the full path to production, the refusals, the forged approvals, the secret scan,
-and the command shapes that must and must not be read as a push. They run on Linux, macOS and
-Windows, on Node 20 and 22.
+the command shapes that must and must not be read as a push, and real pushes through git's own
+hook. They run on Linux, macOS and Windows, on Node 20, 22 and 24.
 
-The guard was reviewed twice by an independent agent that was asked to break it. Every bypass it
-found is either closed and covered by a test, or listed under Limits.
+The guard was reviewed twice by an independent agent that was asked to break it, and a third
+time by an outside reviewer. Every bypass they found is either closed and covered by a test, or
+listed under Limits.

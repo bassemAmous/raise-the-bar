@@ -9,6 +9,10 @@ Use the project's notes or docs folder if it has one, for example `docs/hunts/<t
 folder is ignored by version control, the file exists on one machine only, and removing a worktree
 deletes it. Copy it out before cleaning up, and say in the report where the durable copy is.
 
+In find-only mode, keep the file outside the repository, in a temp or scratch folder. That mode
+must leave the tree untouched, and a new file in the repository would break that. Say in the
+report where the file is.
+
 ## Attack angles (the columns)
 
 Pick the angles that fit the target. Each round takes fresh cells, so the same code is seen from

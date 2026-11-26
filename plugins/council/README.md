@@ -26,13 +26,15 @@ the answer, and every number is traced to a source or marked as assumed.
 - **The Chair does not vote.** It computes the scores from the cards with a fixed rule and never
   adjusts them.
 - **Numbers are checked by a script.** `check-numbers.mjs` fails the verdict when it contains a
-  figure that is in no source file. It compares values, not meaning, and says so in its header.
+  figure that is in no source file, or a score sum that does not add up. It compares values, not
+  meaning, and says so in its header.
 - **It tells you when not to use it.** A clear answer gets one line, not a council.
 
 ## Cost
 
 A council spawns agents. `boardroom` says the number of seat runs before it starts: about 8 in
-quick mode and 15 to 21 in full mode.
+quick mode and 15 to 21 in full mode. `senior-council` does the same: 10 to 12 runs for a panel of
+five. Both ask before the first run.
 
 ## Acknowledgements
 

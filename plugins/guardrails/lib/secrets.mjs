@@ -215,6 +215,15 @@ export function scanText(text, file, { allowPaths = [] } = {}) {
   return report.findings;
 }
 
+export const COMMIT_MESSAGE = "(commit message)";
+
+/** A commit message goes into history like any file: { findings, waived } for its text. */
+export function scanMessage(text) {
+  const report = newReport();
+  readText(String(text ?? ""), COMMIT_MESSAGE, [], report);
+  return report;
+}
+
 export function secretFiles(names, { allowPaths = [] } = {}) {
   return names.filter((name) => SECRET_FILE.test(name) && !matchesAny(name, allowPaths));
 }
@@ -244,7 +253,8 @@ const MAX_NEW_FILES = 5000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const INTERACTIVE_ADD = new Set(["-p", "-i", "-e", "--patch", "--interactive", "--edit"]);
 const FORCED_ADD = /^(?:--force|-[a-zA-Z]*f[a-zA-Z]*)$/;
-const UNREADABLE_PATH = /[$`]/;
+// A path the shell rewrites before git sees it: a variable, a command, or a brace list ({a,b}.js).
+const UNREADABLE_PATH = /[$`{}]/;
 const rows = (text) => (text ?? "").split("\n").filter(Boolean);
 const QUIET = ["-c", "core.quotePath=false"];
 
@@ -253,11 +263,16 @@ function newFilesFor(adds, root) {
   // `git add -f` also takes files that .gitignore hides, so those are listed too.
   const forced = adds.some((add) => add.args.some((arg) => FORCED_ADD.test(arg)));
   const listing = [...QUIET, "ls-files", "-o", ...(forced ? [] : ["--exclude-standard"])];
-  const untracked = new Set(rows(tryGit(listing, root)));
+  const listed = tryGit(listing, root);
+  // A listing that failed is not an empty one: the caller refuses the commit instead of reading nothing.
+  if (listed === null) return null;
+  const untracked = new Set(rows(listed));
   if (untracked.size === 0) return [];
   const wanted = new Set();
   for (const add of adds) {
     const args = add.args.filter((arg) => !INTERACTIVE_ADD.has(arg));
+    // A path the shell rewrites first cannot be tried here, so every new file is taken as going in.
+    if (args.some((arg) => !arg.startsWith("-") && UNREADABLE_PATH.test(arg))) return [...untracked];
     const out = add.folder ? tryGit([...QUIET, "add", "--dry-run", "--ignore-missing", ...args], add.folder) : null;
     // A dry run that fails tells us nothing, so every new file is taken as going in.
     if (out === null) return [...untracked];
@@ -323,6 +338,7 @@ export function scanCommit(folder, { scope = null, adds = [], allowPaths = [] } 
 
   if (adds.length) {
     const fresh = newFilesFor(adds, root);
+    if (fresh === null) return failed;
     if (fresh.length > MAX_NEW_FILES)
       return {
         error: `${fresh.length} new files would be added, too many to read in one go. Add generated folders to .gitignore, or commit in smaller parts`,

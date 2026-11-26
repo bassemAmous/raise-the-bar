@@ -1,7 +1,7 @@
 {
   "name": "craft",
-  "version": "0.1.0",
-  "description": "Engineering skills that hold agent work to a senior bar: build-it, clean-code, performance, bug-hunt, ux-review, worktree-first, bug-retro and later.",
+  "version": "0.2.0",
+  "description": "Engineering skills that hold agent work to a senior bar: build-it, clean-code, performance, bug-hunt, ux-review, worktree-first, bug-retro and later, with a read-only reviewer agent.",
   "author": {
     "name": "bassemAmous",
     "url": "https://github.com/bassemAmous"

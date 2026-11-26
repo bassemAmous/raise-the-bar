@@ -1,6 +1,6 @@
 ---
 name: bug-retro
-description: Runs a one-minute retrospective right after a bug fix and saves the lesson where the next session will read it. Captures the symptom, the root cause, the clue that was missed, the pattern to remember, and a short list of checks that leads straight to the cause next time. Keeps one entry per class of bug, not per bug. Use after any fix that took more than one attempt, or when the user says "save this bug", "learn from this", "don't repeat this", "post-mortem", "retro" or "why did we miss this". Skips trivial fixes and unproven theories.
+description: Runs a one-minute retrospective right after a bug fix and saves the lesson where the next session will read it. Captures the symptom, the root cause, the clue that was missed, the pattern to remember, and a short list of checks that leads straight to the cause next time. Keeps one entry per class of bug, not per bug. Use after any fix that took more than one attempt, or when the user says "save this bug", "learn from this", "don't repeat this", "post-mortem", "retro" or "why did we miss this". Not for trivial fixes or unproven theories.
 ---
 
 # bug-retro
@@ -28,11 +28,13 @@ saved in the place the next session reads at start, because a lesson nobody load
 ## Steps
 
 1. **Find where lessons live.** Look in this order and use the first that exists:
+   - a lessons file or folder that the project's agent instructions file already points to,
    - the agent's own persistent memory for this project, if your tool has one and loads it at the
      start of a session,
-   - a lessons file or folder that the project's agent instructions file already points to,
    - otherwise `docs/lessons/` in the repository, with one file per bug class and an index file.
-   The reason for the order: the lesson must be read without anyone remembering to look for it.
+   The reason for the order: a project file reaches every teammate's session, and the agent's own
+   memory reaches one person's sessions only. In both, the lesson is read without anyone
+   remembering to look for it.
 2. **Look for an existing entry on this class.** Search the store for the key words of the
    pattern. If one covers it, update that entry: add this bug as a new example and sharpen the
    checks. One entry per class keeps the store short enough to be read.

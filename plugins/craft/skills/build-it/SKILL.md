@@ -1,6 +1,6 @@
 ---
 name: build-it
-description: Takes a rough idea from first sentence to working, proven code. Sharpens the ask into a short brief, writes a plan, has the plan reviewed before any code exists, builds the smallest version that delivers the value, then proves it with tests and a real run. Use when the user says "build this", "add a feature", "I want a ...", "can you create", "make this idea real", "implement this", or drops a feature idea with no plan. Also use for "review my plan" or "poke holes in this plan", which runs the planning half only and changes nothing. Not for bug hunting (bug-hunt), code grading (clean-code) or slow code (performance).
+description: Takes a rough idea from first sentence to working, proven code. Sharpens the ask into a short brief, writes a plan, has the plan reviewed before any code exists, builds the smallest version that delivers the value, then proves it with tests and a real run. Use when the user says "build this", "add a feature", "I want a ...", "can you create", "make this idea real", "implement this", or drops a feature idea with no plan. Also use for "review my plan", which runs the planning half only and changes nothing. Not for a one-line or trivial edit (just make it, do not run this skill), bug hunting (bug-hunt), code grading (clean-code) or slow code (performance).
 ---
 
 # build-it
@@ -13,7 +13,7 @@ short report. It does not push, merge or deploy.
 ## When to use
 
 - The user drops a feature idea or a change request with no plan: "build X", "add Y", "I want a ...".
-- The user has a plan and wants it checked first: "review my plan", "poke holes in this". Run
+- The user has a plan and wants it checked first: "review my plan", "check this plan before I build". Run
   steps 1 to 7 only. In that mode nothing is edited, and `git status` must be unchanged at the end.
 
 ## When not to use
@@ -52,15 +52,17 @@ short report. It does not push, merge or deploy.
    dependency).
 7. **Review the plan before code.** Follow `references/plan-review.md`. For a small change, review
    it yourself. For a weighty one (new module, authentication, payments, data migration, public
-   API), use a reviewer that did not write the plan, for example the `guardrails:readonly-reviewer`
+   API), use a reviewer that did not write the plan, for example the `craft:readonly-reviewer`
    agent. Give it the plan and the code paths, not your opinion of the plan. It returns a verdict
    (sound, fix first, or rethink), the gaps, and the evidence for each gap. Fold the fixes in.
 8. **Build in a worktree.** Use `worktree-first` so the main checkout stays clean. Match the
    conventions of the code around you and hold the `clean-code` bar while writing. If the work
-   splits into independent parts, helper agents can build them in parallel: one agent per file,
-   each in its own worktree, each brief with acceptance criteria. Each helper returns a summary of
-   its diff and the exact commands it ran with their output. Read every diff and rerun the checks
-   yourself, because a helper's "done" is a claim, not evidence.
+   splits into independent parts, helper agents can build them in parallel. Split by slice of
+   behaviour, not one agent per file: each agent gets one slice and every file that slice needs,
+   and no file goes to two agents. Each works in its own worktree, from a brief with acceptance
+   criteria. Each helper returns a summary of its diff and the exact commands it ran with their
+   output. Read every diff and rerun the checks yourself, because a helper's "done" is a claim,
+   not evidence.
 9. **Prove it.** Find the project's own commands in its files (for example `package.json` scripts,
    a `Makefile`, `pyproject.toml`, the CI configuration). Run the type check or compile step, the
    linter, and the affected tests. Then run the feature in the real app and use it.
@@ -120,6 +122,9 @@ Not verified: <anything you could not run, said plainly, or "nothing">
 - Stay inside the brief. New ideas found during the build go to `later`, not into this change.
 - Do not commit, push or merge unless the user asked for it in this request. Before a push, run
   `guardrails:push-review`. Before saying "done" on a large change, run `guardrails:done-check`.
+  If the guardrails plugin is not installed, do both by hand: before a push, run the checks on the
+  exact commit and have `craft:readonly-reviewer` read the diff, and before "done", rerun the
+  checks and match each claim in the report to its output.
 
 ## Common mistakes
 

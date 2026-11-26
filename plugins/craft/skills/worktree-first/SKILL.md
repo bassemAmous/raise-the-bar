@@ -1,6 +1,6 @@
 ---
 name: worktree-first
-description: Keeps the main checkout clean by doing every multi-file change, and every helper agent's work, in its own git worktree on its own branch, then promoting the result deliberately after review and tests. Also covers retiring a worktree without losing work and keeping scratch files out of the repository. Use before starting a feature or a multi-file fix, before spawning agents that edit code, and when the user says "use a worktree", "do this in isolation", "don't touch my working copy", "keep main clean", "work on a separate branch", "clean up the worktrees" or "why are there so many changed files".
+description: Keeps the main checkout clean by doing every multi-file change, and every helper agent's work, in its own git worktree on its own branch, then promoting the result deliberately after review and tests. Also covers retiring a worktree without losing work and keeping scratch files out of the repository. Use before starting a feature or a multi-file fix, before spawning agents that edit code, and when the user says "use a worktree", "do this in isolation", "don't touch my working copy", "keep main clean", "work on a separate branch", "clean up the worktrees" or "why are there so many changed files". Not for a one-file edit or a read-only task.
 ---
 
 # worktree-first
@@ -37,19 +37,26 @@ are promoted on purpose, after review and tests.
 
    ```
    git fetch origin
-   git worktree add <folder outside the repo>/<topic> -b <new-branch> origin/<base-branch>
+   git worktree add --no-track <folder outside the repo>/<topic> -b <new-branch> origin/<base-branch>
    ```
 
    Put the folder outside the repository, for example a sibling directory, so the main checkout
-   does not list it as untracked.
+   does not list it as untracked. `--no-track` stops the new branch from taking the base branch
+   as its upstream. Without it, a later plain `git push` can aim at the base branch.
 4. **Set it up as its own project.** Install dependencies inside the worktree with the project's
    own install command. Do not link the main checkout's dependency folder into it. A link makes
    tools resolve packages from the wrong tree, and a recursive delete can follow the link back
    into the main checkout. Copy local configuration files the app needs (ignored files are not
    carried over), and keep secrets out of commits.
-5. **Do all the work there.** Run every command with the worktree as the working directory. One
-   session per folder. Keep screenshots, dumps and probe scripts in a scratch folder outside any
-   repository, so the diff shows only the real change.
+5. **Do all the work there.** If the session has Claude Code's own worktree tools
+   (`EnterWorktree`, `ExitWorktree`), use them to move the session into the worktree. Otherwise
+   name the folder in every command: `git -C <worktree> <command>`, or `cd <worktree> &&
+   <command>` on one line. A shell can go back to its start folder after a command that ends
+   outside the session's working folders. The next command then runs in the main checkout with
+   no warning. For a test run used as proof, print the folder in the same command: `cd
+   <worktree> && git rev-parse --show-toplevel && <test command>`. One session per folder. Keep
+   screenshots, dumps and probe scripts in a scratch folder outside any repository, so the diff
+   shows only the real change.
 6. **Give each helper agent its own worktree.** If your agent tool has a worktree isolation
    option, use it. Otherwise create one worktree per agent and name it in the brief. Assign each
    file to one agent only. Each helper returns its branch name, its commits, and the commands it
@@ -57,7 +64,7 @@ are promoted on purpose, after review and tests.
 7. **Review before promoting.** Read the full diff against the base (`git diff
    origin/<base-branch>...<new-branch>`). The reviewer must not be the author: for a helper's
    work that is you, and for your own work use a second agent such as
-   `guardrails:readonly-reviewer` on anything weighty.
+   `craft:readonly-reviewer` on anything weighty.
 8. **Test the result that will land.** Fetch again, bring the branch up to date with the base,
    then run the project's checks in the worktree (type check or compile, lint, tests, found in
    `package.json`, a `Makefile`, `pyproject.toml` or the CI configuration). Tests that passed on
@@ -65,10 +72,12 @@ are promoted on purpose, after review and tests.
 9. **Promote on purpose.** Use the project's normal route: a pull request, or a merge or
    cherry-pick the user asked for. Promote only the commits that were approved. If picking them
    drags unapproved work along, stop and say so. Run `guardrails:push-review` before any push,
-   and follow the rules of your protected branches.
-10. **Retire the worktree safely.** Only after its commits are on a remote or merged. Follow
-    `references/retire-and-sync.md`: check that nothing unpushed or ignored-but-unique would be
-    lost, then `git worktree remove <folder>` and `git worktree prune`.
+   and follow the rules of your protected branches. If the guardrails plugin is not installed,
+   run the checks on the exact commit and have a reviewer who is not the author read the diff.
+10. **Retire the worktree safely.** Only after its commits are merged, on a remote, or on a
+    local branch that stays. Cleanup never pushes. Follow `references/retire-and-sync.md`: check
+    that no commit and no ignored-but-unique file would be lost, then `git worktree remove
+    <folder>` and `git worktree prune`.
 
 ## Output format
 

@@ -139,7 +139,7 @@ export function typedApproval({ transcriptPath, phrase, head, maxAgeMinutes, now
 
 export function approvalFor({ cwd, head, transcriptPath, config }) {
   const record = head ? readRecord(cwd, "approval", head) : null;
-  if (record) return { via: "terminal", at: record.at };
+  if (record) return { via: record.via === "chat" ? "chat-record" : "terminal", at: record.at };
   return typedApproval({
     transcriptPath,
     phrase: config.approval.phrase,

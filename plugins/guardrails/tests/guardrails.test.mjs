@@ -6,10 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { isTypedByHuman, typedApproval } from "../lib/approval.mjs";
-import { globToRegExp, loadConfig } from "../lib/core.mjs";
+import { globToRegExp, loadConfig, startTimeBudget } from "../lib/core.mjs";
 import { dangerIn } from "../lib/danger.mjs";
+import { HOOK_MARK, hookState, hookText } from "../lib/githook.mjs";
+import { detectTestCommand } from "../lib/testcommand.mjs";
 import { judgeCommand, judgeEdit } from "../lib/judge.mjs";
 import { gitCalls, pushesIn } from "../lib/push.mjs";
 import { reviewTrailer } from "../lib/records.mjs";
@@ -25,6 +27,10 @@ const made = [];
 const FAKE_AWS = "AKIA" + "ABCDEFGHIJKLMNOP";
 const FAKE_STRIPE = "sk_" + "live_" + "a1b2c3d4e5f6g7h8i9j0k1l2";
 const FAKE_PASSWORD = "S3cr3t" + "Passw0rd";
+
+// The tests run git as a clean machine would: settings handed to git through the environment
+// (a hooks folder, an alias) belong to the person's own setup, not to the code under test.
+for (const name of Object.keys(process.env)) if (/^GIT_CONFIG_/.test(name)) delete process.env[name];
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 const unix = (file) => file.split("\\").join("/");
@@ -45,6 +51,8 @@ function makeRepo(config = {}, { name = "repo" } = {}) {
   sh(repo, "config", "user.email", "test@example.com");
   sh(repo, "config", "user.name", "Test");
   sh(repo, "config", "commit.gpgsign", "false");
+  // A global core.hooksPath on this machine stays out of the tests too.
+  sh(repo, "config", "core.hooksPath", unix(path.join(repo, ".git", "hooks")));
   sh(repo, "remote", "add", "origin", remote);
   fs.writeFileSync(
     path.join(repo, "guardrails.config.json"),
@@ -282,6 +290,13 @@ test("a commit never takes files that an earlier step on the line could have wri
     'git checkout other-branch -- config/ && git commit -m "x"',
     'git restore --source=other -- . && git commit -am "x"',
     'git merge --squash feature/y && git commit -m "squash"',
+    // Other ways to fill the index from somewhere the scan cannot read yet.
+    'git apply --cached ../fix.patch && git commit -m "x"',
+    'git update-index --cacheinfo 100644,06feaf2975751f753f8610f0ad3d97ea67752a98,app.js && git commit -m "x"',
+    'git read-tree other && git commit -m "x"',
+    'git stash pop --index && git commit -m "x"',
+    'git cherry-pick -n other && git commit -m "x"',
+    'git reset other -- app.js && git commit -m "x"',
   ]) {
     const verdict = judge(repo, line);
     assert.equal(verdict.decision, "deny", line);
@@ -299,6 +314,8 @@ test("a commit never takes files that an earlier step on the line could have wri
     'rm -f old.txt && git add -A && git commit -m "x"',
     'git checkout -b feature/z && git add . && git commit -m "x"',
     'git reset -q && git add app.js && git commit -m "x"',
+    'git reset HEAD app.js && git commit -m "x"',
+    'git reset -- app.js && git commit -m "x"',
     'git add . && git commit -m "x" && npm run build',
   ])
     assert.equal(verdictOf(repo, line), "allow", line);
@@ -662,12 +679,20 @@ test("docs-only changes skip tests and review, never the production approval", (
   assert.match(judge(repo, "git push origin HEAD:staging").reason ?? "allowed", /tests passed for this exact code: NO/);
 });
 
-test("the message says why a check is not required", () => {
+test("a check that cannot run has not passed, and the message says what to do", () => {
   const repo = makeRepo({ tests: { command: null } });
   commit(repo, "app.js", "export const answer = 42;\n");
   const verdict = judge(repo, "git push origin main");
-  assert.match(verdict.reason, /tests passed for this exact code: not required \(no test command found\)/);
+  assert.match(verdict.reason, /tests passed for this exact code: NO/, "no test command is not a pass");
   assert.match(verdict.reason, /review passed for this exact code: NO/);
+  assert.match(verdict.reason, /No test command was found/);
+  assert.match(verdict.reason, /"tests": \{ "required": false \}/);
+  assert.match(cli(repo, "status").stdout, /none found: a push of code to a protected branch is refused/);
+  // A project without tests says so on purpose, and then the push goes.
+  const none = makeRepo({ tests: { command: null, required: false }, review: { required: false }, productionBranches: [] });
+  commit(none, "app.js", "export const answer = 42;\n");
+  assert.equal(verdictOf(none, "git push origin main"), "allow");
+  assert.match(cli(none, "status").stdout, /tests are switched off in the config/);
   const off = makeRepo({ review: { required: false }, productionBranches: [] });
   commit(off, "app.js", "export const answer = 42;\n");
   assert.match(judge(off, "git push origin main").reason, /review passed for this exact code: not required \(switched off/);
@@ -1054,4 +1079,300 @@ test("a line the guard cannot read to the end is refused, not waved through", ()
   // More checks than one line can pay for.
   const many = Array.from({ length: 25 }, (_, index) => `git push origin HEAD:feature/${index}`).join("; ");
   assert.match(judge(repo, many).reason, /more than 20 different commits and pushes/);
+});
+
+test("test command: found from the files of the project", () => {
+  const project = (files) => {
+    const dir = tempDir();
+    for (const [name, content] of Object.entries(files)) {
+      if (content === null) fs.mkdirSync(path.join(dir, name));
+      else fs.writeFileSync(path.join(dir, name), content);
+    }
+    return detectTestCommand(dir);
+  };
+  const withTest = JSON.stringify({ scripts: { test: "vitest run" } });
+  assert.equal(project({ "package.json": withTest }), "npm test");
+  assert.equal(project({ "package.json": withTest, "pnpm-lock.yaml": "" }), "pnpm test");
+  assert.equal(project({ "package.json": withTest, "yarn.lock": "" }), "yarn test");
+  assert.equal(project({ "package.json": withTest, "bun.lock": "" }), "bun test");
+  const placeholder = JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } });
+  assert.equal(project({ "package.json": placeholder }), null, "npm's placeholder is not a test command");
+  assert.equal(project({ "package.json": "{ not json" }), null);
+  assert.equal(project({ "package.json": "{}", Makefile: "build:\n\tcc x.c\ntest:\n\t./run\n" }), "make test");
+  assert.equal(project({ Makefile: "build:\n\tcc x.c\n" }), null);
+  assert.equal(project({ "go.mod": "module x\n" }), "go test ./...");
+  assert.equal(project({ "Cargo.toml": "[package]\n" }), "cargo test");
+  const pytest = process.platform === "win32" ? "python -m pytest" : "python3 -m pytest";
+  assert.equal(project({ "pyproject.toml": "[project]\n", tests: null }), pytest);
+  assert.equal(project({ "pyproject.toml": "[project]\n", test: null }), pytest, "a folder named test counts too");
+  assert.equal(project({ "setup.py": "", test: null }), pytest);
+  assert.equal(project({ "pyproject.toml": "[project]\n" }), null, "a Python project with no test folder");
+  assert.equal(project({ "pom.xml": "<project/>" }), "mvn -q test");
+  assert.equal(project({ "README.md": "x" }), null);
+});
+
+test("a secret in the commit message is a secret in history", () => {
+  const repo = makeRepo();
+  const refused = (command, why = /would put a secret into git history/) => {
+    const verdict = judge(repo, command);
+    assert.equal(verdict.decision, "deny", command.replace(FAKE_AWS, "<key>"));
+    assert.match(verdict.reason, why);
+    assert.ok(!verdict.reason.includes(FAKE_AWS), "the value is never printed");
+  };
+  refused(`git commit --allow-empty -m "Rotate ${FAKE_AWS}"`, /\(commit message\):1/);
+  refused(`git commit --allow-empty --message="Rotate ${FAKE_AWS}"`);
+  refused(`git commit --allow-empty -am "Rotate ${FAKE_AWS}"`);
+  refused(`git commit --allow-empty -m "$(cat <<'EOF'\nRotate the key\n\n${FAKE_AWS}\nEOF\n)"`);
+  refused(`git commit --allow-empty -F - <<'EOF'\nRotate ${FAKE_AWS}\nEOF`);
+  refused(`echo "Rotate ${FAKE_AWS}" | git commit --allow-empty -F -`);
+  refused(`git tag -a v1 -m "key ${FAKE_AWS}"`);
+  refused(`git merge --no-ff -m "key ${FAKE_AWS}" feature/x`);
+  fs.writeFileSync(path.join(path.dirname(repo), "msg.txt"), `Rotate ${FAKE_AWS}\n`);
+  refused("git commit --allow-empty -F ../msg.txt");
+  refused("git commit --allow-empty -F ../missing.txt", /cannot read the message file/);
+  refused('echo "text" > ../msg.txt && git commit --allow-empty -F ../msg.txt', /runs first and can write it/);
+  fs.writeFileSync(path.join(path.dirname(repo), "msg.txt"), "A plain message\n");
+  assert.equal(verdictOf(repo, "git commit --allow-empty -F ../msg.txt"), "allow");
+  assert.equal(verdictOf(repo, 'git commit --allow-empty -m "Rotate the key and read it from the environment"'), "allow");
+  assert.equal(verdictOf(repo, 'git tag -a v1 -m "First release"'), "allow");
+  assert.equal(verdictOf(repo, "git tag -l"), "allow");
+  // The allow comment in a message is a question for a human, as it is in a file.
+  assert.equal(verdictOf(repo, `git commit --allow-empty -m "fixture ${FAKE_AWS} guardrails:allow-secret"`), "ask");
+});
+
+test("a commit by another name is still scanned", () => {
+  const repo = makeRepo();
+  fs.writeFileSync(path.join(repo, "app.js"), `const key = "${FAKE_AWS}";\n`);
+  sh(repo, "add", "app.js");
+  const SECRET = /would put a secret into git history/;
+  for (const verb of ["rebase", "merge", "cherry-pick", "revert", "am"])
+    assert.match(judge(repo, `git ${verb} --continue`).reason ?? "allowed", SECRET, verb);
+  assert.equal(verdictOf(repo, "git rebase --abort"), "allow");
+  assert.equal(verdictOf(repo, "git rebase main"), "allow");
+  // Commits that pick their files in a way the line does not spell out read every changed file.
+  sh(repo, "reset", "-q");
+  for (const flag of ["-p", "--patch", "--interactive", "--pathspec-from-file=paths.txt"])
+    assert.match(judge(repo, `git commit ${flag} -m x`).reason ?? "allowed", SECRET, flag);
+  // `git stage` is `git add`. A brace list is expanded by the shell before git sees it.
+  assert.match(judge(repo, "git stage app.js && git commit -m x").reason ?? "allowed", SECRET);
+  fs.writeFileSync(path.join(repo, "config.js"), "export default {};\n");
+  assert.match(judge(repo, "git add {app,config}.js && git commit -m x").reason ?? "allowed", SECRET);
+  sh(repo, "checkout", "-q", "app.js");
+  fs.writeFileSync(path.join(repo, "new.js"), `const key = "${FAKE_AWS}";\n`);
+  assert.match(judge(repo, "git add {new,config}.js && git commit -m x").reason ?? "allowed", SECRET, "a new file behind a brace list");
+  fs.rmSync(path.join(repo, "new.js"));
+  // A git command with a redirect writes a file, like any other program.
+  assert.match(
+    judge(repo, "git show HEAD:app.js > copy.js && git add copy.js && git commit -m x").reason ?? "allowed",
+    /then commits files as they will be on disk/,
+  );
+  // A shell alias runs from the top folder of the repository, wherever it is called from.
+  fs.mkdirSync(path.join(repo, "sub"));
+  fs.writeFileSync(path.join(repo, "sub", "keep.txt"), "x\n");
+  fs.writeFileSync(path.join(repo, "app.js"), `const key = "${FAKE_AWS}";\n`);
+  sh(repo, "config", "alias.ac", "!git add . && git commit -m x");
+  assert.match(judge(path.join(repo, "sub"), "git ac").reason ?? "allowed", SECRET);
+});
+
+test("a push written another way is still a push", () => {
+  const repo = makeRepo();
+  commit(repo, "app.js", "export const answer = 42;\n");
+  const refused = (command, why = NOT_READY, run = judge) => {
+    const verdict = run(repo, command);
+    assert.equal(verdict.decision, "deny", command);
+    assert.match(verdict.reason, why, command);
+  };
+  // A backslash that Bash drops, more options after -c, a value after -o.
+  refused("git pu\\sh origin main");
+  refused("g\\it push origin main");
+  refused("bash -c -- 'git push origin main'");
+  refused('sh -c -x "git push origin main"');
+  refused("git push -on origin main");
+  refused("git push -o ci.skip origin main");
+  assert.equal(verdictOf(repo, "git push -n origin main"), "allow", "a dry run sends nothing");
+  // The program is a variable, or what another command prints.
+  const HIDDEN = /a variable or the output of a command/;
+  refused('C="git push origin main"; $C', HIDDEN);
+  refused("$(echo git) push origin main", HIDDEN);
+  refused("`echo git` push origin main", HIDDEN);
+  refused("G=git; ${G} push origin main", HIDDEN);
+  refused("$c push origin main", HIDDEN, judgePs);
+  assert.equal(verdictOf(repo, '"$HOME/bin/tool" --version && git status'), "allow", "a path under a variable is a program");
+  assert.equal(judgePs(repo, "$branch = git rev-parse HEAD").decision, "allow");
+  assert.equal(verdictOf(repo, "$EDITOR notes.txt"), "allow");
+  // An alias or a push rule made on the same line: the guard reads the settings before the line runs.
+  refused('git config alias.pp "push origin main" && git pp', /may be an alias made on this same line/);
+  refused("echo '[alias] pp = push origin main' >> .git/config; git pp", /may be an alias made on this same line/);
+  refused("git config push.default upstream && git push", /can change where a push goes/);
+  refused("git config remote.origin.push HEAD:main && git push origin", /can change where a push goes/);
+  refused("git branch -u origin/main && git push", /can change where a push goes/);
+  assert.equal(verdictOf(repo, 'git config user.name "Test" && git push origin HEAD:feature/x'), "allow");
+  assert.equal(verdictOf(repo, "git config --get remote.origin.url && git push origin HEAD:feature/x"), "allow");
+  assert.equal(verdictOf(repo, "git remote add fork ../fork.git && git push fork HEAD:feature/x"), "allow");
+  assert.equal(verdictOf(repo, "git lfs status"), "allow", "a word git does not know is fine on its own");
+  // A push rule that is already in the config is read.
+  sh(repo, "checkout", "-q", "-b", "feature/x");
+  assert.equal(verdictOf(repo, "git push origin"), "allow");
+  sh(repo, "config", "remote.origin.push", "HEAD:main");
+  refused("git push origin");
+  refused("git push");
+  sh(repo, "config", "--unset", "remote.origin.push");
+  refused("git -c remote.origin.push=HEAD:main push origin");
+  // Settings that switch a hook off or feed git its config from outside the command.
+  refused("HUSKY=0 git push origin HEAD:feature/x", /sets `HUSKY=0`/);
+  refused("export HUSKY=0; git commit --allow-empty -m x", /sets `HUSKY=0`/);
+  refused("$env:HUSKY=0; git push origin HEAD:feature/x", /HUSKY=0/, judgePs);
+  refused("GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=status git push origin HEAD:feature/x", /GIT_CONFIG_COUNT/);
+  assert.equal(verdictOf(repo, 'git commit --allow-empty -m "docs: what HUSKY=0 does"'), "allow", "text in a message is not a setting");
+  assert.equal(verdictOf(repo, "HUSKY=0 npm install"), "allow");
+  // The hooks folder holds the second check.
+  assert.equal(verdictOf(repo, "git config core.hooksPath /tmp/hooks"), "ask");
+  assert.equal(verdictOf(repo, "echo 'exit 0' > .git/hooks/pre-push"), "ask");
+  assert.equal(verdictOf(repo, "rm -f .git/hooks/pre-push"), "ask");
+  assert.equal(verdictOf(repo, "cat .git/hooks/pre-push"), "allow");
+  assert.equal(judgeEdit({ filePath: path.join(repo, ".git", "hooks", "pre-push") }).decision, "ask");
+});
+
+test("destructive commands: longer flag groups and the short database forms", () => {
+  const repo = makeRepo();
+  for (const command of [
+    "rm -rfvd ~",
+    "rm -Rfv ~/",
+    "rm -vrf /",
+    'psql -c "TRUNCATE orders"',
+    'psql "$DATABASE_URL" -c "truncate orders cascade"',
+    'mysql -e "TRUNCATE orders"',
+    "dropdb app",
+    "mysqladmin drop app",
+    "mysqladmin -f drop app",
+  ])
+    assert.equal(verdictOf(repo, command), "deny", command);
+  for (const command of [
+    "rm -rfv build",
+    "rm -rfvd node_modules/.cache",
+    'echo "truncate the list"',
+    "grep -ri truncate docs",
+    'git commit --allow-empty -m "truncate long names"',
+    "mysqladmin status",
+    "createdb app",
+    "Remove-Item -ErrorAction SilentlyContinue build",
+  ])
+    assert.equal(verdictOf(repo, command), "allow", command);
+});
+
+test("git checks the push a second time, with the commit and the branch it really sends", () => {
+  const repo = makeRepo({ productionBranches: [] });
+  const push = (...args) => spawnSync("git", ["push", ...args], { cwd: repo, encoding: "utf8" });
+  const remoteMain = () => sh(repo, "ls-remote", "origin", "refs/heads/main").split(/\s+/)[0];
+  assert.match(cli(repo, "status").stdout, /pre-push hook +not installed/);
+  const installed = cli(repo, "install-hook");
+  assert.equal(installed.status, 0, installed.stderr);
+  const hook = path.join(repo, ".git", "hooks", "pre-push");
+  assert.match(fs.readFileSync(hook, "utf8"), new RegExp(HOOK_MARK));
+  assert.equal(hookState(repo), "current");
+  assert.match(cli(repo, "status").stdout, /pre-push hook +installed/);
+  assert.equal(cli(repo, "install-hook").status, 0, "installing twice is fine");
+
+  const before = remoteMain();
+  const head = commit(repo, "app.js", "export const answer = 42;\n");
+  // Whatever the command line looked like, git itself asks before it sends.
+  const stopped = push("origin", "main");
+  assert.notEqual(stopped.status, 0);
+  assert.match(stopped.stderr, NOT_READY);
+  assert.match(stopped.stderr, /tests passed for this exact code: NO/);
+  assert.equal(remoteMain(), before, "nothing reached the remote");
+  assert.notEqual(push("origin", "HEAD:refs/heads/main").status, 0, "the branch git sends to is what counts");
+  assert.equal(push("origin", "HEAD:feature/x").status, 0, "a feature branch is not held");
+  // With the checks on record, the same push goes.
+  assert.equal(cli(repo, "test").status, 0);
+  assert.equal(cli(repo, "review-stamp", "--report", passingReport(repo, head)).status, 0);
+  const sent = push("origin", "main");
+  assert.equal(sent.status, 0, sent.stderr);
+  assert.equal(remoteMain(), head);
+  // History on a protected branch only moves forward, also here.
+  sh(repo, "reset", "-q", "--hard", before);
+  const rewrite = push("--force", "origin", "main");
+  assert.notEqual(rewrite.status, 0);
+  assert.match(rewrite.stderr, /rewrite or delete the protected branch "main"/);
+  assert.match(push("origin", ":main").stderr, /rewrite or delete the protected branch "main"/);
+  assert.equal(remoteMain(), head);
+
+  // A hook that names a copy of the guard that is gone refuses, and the guard writes it again.
+  sh(repo, "reset", "-q", "--hard", head);
+  commit(repo, "app.js", "export const answer = 43;\n");
+  fs.writeFileSync(hook, hookText("/no/such/folder/cli.mjs"));
+  assert.equal(hookState(repo), "stale");
+  const lost = push("origin", "main");
+  assert.notEqual(lost.status, 0);
+  assert.match(lost.stderr, /the guard has moved/);
+  assert.match(lost.stderr, /not checked, so it is not sent/);
+  assert.match(judge(repo, "git push origin main").reason, NOT_READY);
+  assert.equal(hookState(repo), "current", "the guard wrote the hook again");
+
+  // Another tool's hook is never replaced.
+  const other = makeRepo();
+  const theirs = path.join(other, ".git", "hooks", "pre-push");
+  fs.writeFileSync(theirs, "#!/bin/sh\nexit 0\n");
+  const kept = cli(other, "install-hook");
+  assert.equal(kept.status, 1);
+  assert.match(kept.stderr, /already holds another hook/);
+  assert.match(kept.stderr, /gate "\$@" \|\| exit 1/);
+  assert.equal(fs.readFileSync(theirs, "utf8"), "#!/bin/sh\nexit 0\n");
+});
+
+test("an approval typed in the chat reaches the second check, and ends on time", () => {
+  const { repo, head } = readyRepo();
+  assert.equal(cli(repo, "install-hook").status, 0);
+  // readyRepo let the push through on the typed line. That left a record git's own hook can read.
+  const record = JSON.parse(
+    fs.readFileSync(path.join(repo, ".git", "guardrails", "approval", `${sh(repo, "rev-parse", "HEAD^{tree}")}.json`), "utf8"),
+  );
+  assert.equal(record.via, "chat");
+  assert.ok(Date.parse(record.expiresAt) > Date.now());
+  const sent = spawnSync("git", ["push", "origin", "main"], { cwd: repo, encoding: "utf8" });
+  assert.equal(sent.status, 0, sent.stderr);
+  assert.equal(sh(repo, "ls-remote", "origin", "refs/heads/main").split(/\s+/)[0], head);
+  // A commit with tests and review but no approval is held by both checks.
+  const next = commit(repo, "app.js", "export const answer = 43;\n");
+  assert.equal(cli(repo, "test").status, 0);
+  assert.equal(cli(repo, "review-stamp", "--report", passingReport(repo, next)).status, 0);
+  const held = spawnSync("git", ["push", "origin", "main"], { cwd: repo, encoding: "utf8" });
+  assert.notEqual(held.status, 0);
+  assert.match(held.stderr, /approved by a human: NO/);
+});
+
+test("a guard that fails refuses what can ship code, says which check failed, and leaves the rest alone", () => {
+  const repo = makeRepo();
+  commit(repo, "app.js", "export const answer = 42;\n");
+  // Inside the process: no time left, so the first git call gives up, and the error names the check.
+  startTimeBudget(-1);
+  try {
+    assert.throws(
+      () => judge(repo, "git push origin main"),
+      (error) => error.name === "OutOfTime" && typeof error.guardStage === "string" && error.guardStage.length > 0,
+    );
+  } finally {
+    startTimeBudget(Number.POSITIVE_INFINITY);
+  }
+  // The hook process: a clock that jumps a minute after the first reading leaves the checks no time.
+  const preload = path.join(tempDir(), "late.mjs");
+  fs.writeFileSync(
+    preload,
+    "const now = Date.now.bind(Date);\nlet readings = 0;\nDate.now = () => now() + (readings++ > 0 ? 60000 : 0);\n",
+  );
+  const run = (command) =>
+    spawnSync("node", ["--import", pathToFileURL(preload).href, HOOK], {
+      input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", cwd: repo, tool_input: { command } }),
+      encoding: "utf8",
+    });
+  const push = run("git push origin main");
+  assert.equal(push.status, 0);
+  assert.equal(JSON.parse(push.stdout).hookSpecificOutput.permissionDecision, "deny");
+  assert.match(JSON.parse(push.stdout).hookSpecificOutput.permissionDecisionReason, /was not checked, so it is not let through/);
+  const lines = push.stderr.trim().split("\n");
+  assert.equal(lines.length, 1, "one plain line on stderr");
+  assert.match(lines[0], /^guardrails: the check ".+" failed: git .+ did not answer in time$/);
+  const list = run("ls -la");
+  assert.equal(list.status, 0);
+  assert.equal(list.stdout, "", "a line that cannot ship code is not blocked by a bug in the guard");
 });

@@ -37,8 +37,8 @@ written limits, use those and say so.
 
 ## D: duplication and reuse
 
-- **D1** The same few lines in two places are a helper waiting to be extracted. Say where it
-  should live.
+- **D1** The same few lines in two places are noted, not extracted. A third copy is the moment to
+  extract a helper. Say where it should live.
 - **D2** Before adding a helper, search for the concept, not the name. A second copy of an
   existing helper is a finding.
 - **D3** Shared truth (types, validation schemas, constants, translations) lives in one place.
@@ -82,8 +82,8 @@ written limits, use those and say so.
 - **T2** Arrange, act and assert are visible. Helpers are named by intent.
 - **T3** A module with public behaviour and no test is Major.
 - **T4** A bug fix ships with a test that failed on the old code. The commit says so.
-- **T5** No tolerated failing tests. A failing test is fixed or removed, with the reason written
-  down.
+- **T5** No tolerated failing tests. A failing test is fixed or reported. It is removed or changed
+  only when the test itself is wrong and the user agrees, with the reason written down.
 - **T6** A test is not loosened to make a change pass.
 
 ## R: the newcomer test

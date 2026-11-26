@@ -19,7 +19,8 @@ export const DEFAULTS = {
   approval: { phrase: "approve production", maxAgeMinutes: 60 },
   secretScan: { enabled: true, allowPaths: [] },
   dangerGuard: { enabled: true },
-  // What to do when the guard itself crashes: "allow" keeps you working, "deny" is stricter.
+  // What to do when the guard itself crashes on a line that cannot commit, push or deploy:
+  // "allow" keeps you working, "deny" is stricter. A line that can is always refused.
   onGuardError: "allow",
 };
 
@@ -49,21 +50,45 @@ export function decide(decision, reason) {
   process.exit(0);
 }
 
-export function git(args, cwd) {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 15000,
-    // A first commit or a lockfile is easily over Node's 1 MB default.
-    maxBuffer: 256 * 1024 * 1024,
-  }).trim();
+const GIT_TIMEOUT_MS = 15000;
+
+/** git did not answer in time. That is not an answer, so it is never read as "nothing to check". */
+export class OutOfTime extends Error {
+  constructor(args) {
+    super(`git ${args.slice(0, 3).join(" ")} did not answer in time`);
+    this.name = "OutOfTime";
+  }
 }
 
+// A hook has a time limit, and a check that is cut off checked nothing. The hook sets one
+// budget for all of its git calls, so it can refuse in time instead of being stopped half way.
+let deadline = Infinity;
+export function startTimeBudget(ms) {
+  deadline = Date.now() + ms;
+}
+
+function runGit(args, options) {
+  const left = deadline - Date.now();
+  if (left <= 0) throw new OutOfTime(args);
+  try {
+    return execFileSync("git", args, { ...options, stdio: ["ignore", "pipe", "ignore"], timeout: Math.min(GIT_TIMEOUT_MS, left) });
+  } catch (error) {
+    if (error?.code === "ETIMEDOUT") throw new OutOfTime(args);
+    throw error;
+  }
+}
+
+export function git(args, cwd) {
+  // A first commit or a lockfile is easily over Node's 1 MB default.
+  return runGit(args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).trim();
+}
+
+/** The answer of git, or null when git says no. Running out of time is thrown, not hidden. */
 export function tryGit(args, cwd) {
   try {
     return git(args, cwd);
-  } catch {
+  } catch (error) {
+    if (error instanceof OutOfTime) throw error;
     return null;
   }
 }
@@ -71,8 +96,9 @@ export function tryGit(args, cwd) {
 /** A file's content out of git, as bytes (it may not be text). null when git cannot give it. */
 export function gitBytes(args, cwd) {
   try {
-    return execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "ignore"], timeout: 15000, maxBuffer: 64 * 1024 * 1024 });
-  } catch {
+    return runGit(args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+  } catch (error) {
+    if (error instanceof OutOfTime) throw error;
     return null;
   }
 }

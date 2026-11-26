@@ -10,8 +10,13 @@ BLOCK and the list from `principles.md` under PRINCIPLES. Give absolute paths.
 **Options.** The brief lists the options (A, B, C, always including "do nothing"). Every card
 scores every option. A yes-or-no decision has two options: "do it as proposed" and "do not".
 
-**Own-lens score.** The seat's score for the option it recommends, judged only on its own
-dimension.
+**Own-lens score.** The seat's score for every option, judged only on its own dimension. Every
+option gets one, because the scorecard reads the recommended option's value from every seat,
+including the seats that back another option.
+
+**Ruin risk and undo.** Every card answers both for every option, not only for the option the
+seat backs. The caps in `scoring.md` read the recommended option's answers from every seat. A seat
+that backs another option is often the one that sees the danger.
 
 ---
 
@@ -37,10 +42,10 @@ Answer in the first person, in plain text, under 350 words, in exactly this shap
 SEAT: [SEAT KEY] ([dimension])
 POSITION: Strong yes | Yes | Yes if | No | Strong no   (on the option you recommend)
 OPTION SCORES: A n/10, B n/10, C n/10   (how strongly you back each option)
-OWN-LENS SCORE: n/10   (the option you recommend, judged on your dimension alone)
+OWN-LENS SCORE: A n/10, B n/10, C n/10   (each option judged on your dimension alone)
 CONFIDENCE: n/5
-RUIN RISK: none | possible | likely   (a loss that could end the company or a key relationship)
-UNDO: easy | costly | no   (how hard it is to reverse the option you recommend, for a company this size)
+RUIN RISK: A r, B r, C r   (r is none, possible or likely: a loss that could end the company or a key relationship)
+UNDO: A u, B u, C u   (u is easy, costly or no: how hard that option is to reverse, for a company this size)
 
 MY CALL: one sentence, naming the option or a variant of it.
 REASONS:
@@ -95,10 +100,10 @@ ON THE CRUXES: your answer to each crux, one or two lines each.
 WEAKEST PART OF MY OWN CASE: the assumption you would attack if you sat across the table.
 POSITION: Strong yes | Yes | Yes if | No | Strong no
 OPTION SCORES: A n/10, B n/10, C n/10
-OWN-LENS SCORE: n/10
+OWN-LENS SCORE: A n/10, B n/10, C n/10
 CONFIDENCE: n/5
-RUIN RISK: none | possible | likely
-UNDO: easy | costly | no
+RUIN RISK: A r, B r, C r   (r is none, possible or likely, for every option)
+UNDO: A u, B u, C u   (u is easy, costly or no, for every option)
 MOVED: no | yes, from X to Y, because [the argument or the fact, and who made it]
 CONDITIONS FOR YES: up to three, each one checkable (a number, a date, a test result).
 
@@ -126,9 +131,13 @@ Answer in the first person, under 150 words, in exactly this shape:
 
 SEAT: [SEAT KEY]
 VOTE: Endorse | Endorse with change | Dissent
+POSITION: Strong yes | Yes | Yes if | No | Strong no
 OPTION SCORES: A n/10, B n/10, C n/10   (given the conditions in the resolution)
 SUPPORT: n/10   (your support for the resolution as written)
-OWN-LENS SCORE: n/10
+OWN-LENS SCORE: A n/10, B n/10, C n/10
+CONFIDENCE: n/5
+RUIN RISK: A r, B r, C r   (r is none, possible or likely, given the conditions in the resolution)
+UNDO: A u, B u, C u   (u is easy, costly or no, for every option)
 CHANGE OR DISSENT: one or two sentences. What to change, or why you dissent. Blank if you endorse.
 ONE LINE FOR THE FOUNDER: the thing from your seat that must not be forgotten.
 ```

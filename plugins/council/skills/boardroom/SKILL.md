@@ -6,8 +6,9 @@ description: >-
   independent positions, cross-examine each other and score every option. Returns one
   recommendation with conditions, the dissent kept, and every number traced to the brief or marked
   assumed. Use when the user says "boardroom", "take it to the board", "debate this decision",
-  "A or B", "argue both sides", "stress-test this choice", or faces a pricing, pivot, hiring or
-  big-spend call that is hard to undo. Not for clear answers, and not for code-level forks (use
+  "A or B", "argue both sides of this decision", "stress-test this choice", or faces a pricing,
+  pivot, hiring or big-spend call that is hard to undo. Not for clear answers, and not for
+  code-level forks or a technical build-or-buy such as a library or a datastore (use
   senior-council).
 ---
 
@@ -39,9 +40,11 @@ Do not use it when:
 
 ### 1. Write the brief
 
-Under 300 words, saved as `brief.md` in the session folder. The folder is
-`council/<YYYY-MM-DD>-<slug>/` under the project's docs folder, or at the project root. Say the path
-before the first write. It will hold money figures, so it stays out of any public repository.
+Under 300 words, saved as `brief.md` in the session folder. The session folder holds working files
+with money figures, so it does not go in the project by default. Use
+`council/<YYYY-MM-DD>-<slug>/` in a temp folder outside the project, unless the user names another
+place. Say the path before the first write. If the user names a place inside a git repository, run
+the check in step 6, item 4, first.
 
 - The decision in one line, and the options A, B, C. Always include "do nothing" or "keep what we
   do now". If the user brought one idea, add its smaller version as an option.
@@ -62,8 +65,9 @@ Read `references/seats.md`. Seat every seat whose question the decision lives in
 guard (`money` or `bet`), and the seat most likely to disagree. Leave out seats the decision barely
 touches. Give each seat a weight from 1 to 3 with a one-line reason.
 
-- **Quick** (default for a call that can be undone): 4 seats, Rounds 1 and 2. About 8 seat runs.
-- **Full** (a call that is hard to undo, or that touches price, cash or a signed contract): 5 to 7
+- **Quick** (default for a call that is costly to undo but can still be undone): 4 seats, Rounds 1
+  and 2. About 8 seat runs.
+- **Full** (a call that cannot be undone, or that touches price, cash or a signed contract): 5 to 7
   seats, 3 rounds. About 15 to 21 seat runs.
 
 Show the seats, weights, mode and number of seat runs in one short list and ask once. Skip the
@@ -77,9 +81,9 @@ tool with `subagent_type: council:council-seat`, one agent per seat, on the stro
 have. Each prompt is the Round 1 prompt from `references/rounds.md`, with the seat's block, the
 list from `references/principles.md`, the seat's weight and the path to `brief.md`.
 
-Each seat returns one card: position, a score for every option, its own-lens score, confidence,
-ruin risk, how hard the option is to undo, its reasons with sources, the biggest risk, what would
-change its mind, a first step, and one question for the founder.
+Each seat returns one card: position, a score and an own-lens score for every option, confidence,
+the ruin risk of every option, how hard every option is to undo, its reasons with sources, the
+biggest risk, what would change its mind, a first step, and one question for the founder.
 
 Save the cards word for word in `round-1.md`, one `## <seat>` heading each. Add `## Chair notes`:
 - **Cruxes:** one to three disagreements that explain the split (a fact, a number, or a value such
@@ -121,7 +125,14 @@ The Chair wrote the text, so a script checks the Chair. That is the reason for i
    apply its overrides. You compute. You never adjust.
 2. Write `verdict.md` by copying the template in `references/verdict.md`.
 3. Run `node "${CLAUDE_PLUGIN_ROOT}/skills/boardroom/scripts/check-numbers.mjs" <session folder>`.
-   Exit code 1 means a figure in the verdict is in no source file: remove it or trace it.
+   Exit code 0 means clean. Exit code 1 means a finding: a figure that is in no source file
+   (remove it or trace it), a `Math` line that does not add up (recompute it), or a verdict with
+   nothing to read. Fix the verdict and run the check again. Exit code 2 means the check did not
+   run (wrong arguments, a missing file, a crash). That is never a pass: fix the command.
+4. Do not save the verdict into the project unless the user asks. When they ask, ask where. If the
+   place is inside a git repository, run `git check-ignore <file>` first. If it prints nothing,
+   git does not ignore the file and would track it. Say so in plain words before you write, and
+   let the user pick another place or ignore the file first.
 
 ## Output format
 

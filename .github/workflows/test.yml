@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [20, 22]
+        node: [20, 22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +23,22 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Guard hook tests
         run: node --test plugins/guardrails/tests/guardrails.test.mjs
+      - name: Council number check tests
+        run: node --test plugins/council/skills/boardroom/scripts/check-numbers.test.mjs
+
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Skill descriptions, versions and the marketplace file
+        run: node scripts/check-repo.mjs
+      - name: A changed plugin has a new version
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/check-repo.mjs --base "origin/$BASE_REF"

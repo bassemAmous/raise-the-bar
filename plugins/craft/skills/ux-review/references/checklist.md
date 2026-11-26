@@ -4,9 +4,10 @@ Each line is pass or fail on a screenshot you have opened. Quote the line number
 
 ## First-glance test (phone screenshot, every screen)
 
-Judge the screen as a first-time user who reads slowly, word by word, and has never seen it. One
-failed line is a Major finding. Two or more make the screen Critical. A screen that fails line 1
-or 2 is reported first.
+Judge the screen as a first-time user who reads slowly, word by word, and has never seen it. The
+severity of a failed line follows what it does to the user, not how many lines failed: Critical if
+it stops the user from finishing the task or misleads them, Major if it makes the task slow or
+confusing, Minor if it is polish. A screen that fails line 1 or 2 is reported first.
 
 1. **One job per screen.** Within a few seconds a new reader can say what the screen is for and
    what to do first. If the answer is "several things", split the screen. Restyling will not help.
@@ -15,7 +16,8 @@ or 2 is reported first.
 3. **One column, short lines.** No side-by-side blocks on a phone, no wall of text, nothing that
    moves or changes on its own.
 4. **Every icon has a word next to it.** A tick, a cross or a dot alone fails. A symbol that could
-   mean two things says which in words.
+   mean two things says which in words. Do not flag a standard, well-known icon-only control
+   (close, search, menu, back) that has an accessible name.
 5. **State is never shown by colour alone.** Ready, late, pending and done each carry a word or a
    shape as well.
 6. **Plain words.** Short sentences, one idea each. No internal jargon and no abbreviations a new
@@ -58,7 +60,9 @@ Use the project's stated target if it has one. A common target is WCAG 2.2 level
 
 - Text contrast is sufficient against its background, including on images and in disabled-looking
   states that are still readable content.
-- Touch targets are large enough to hit, around 44 px, with space between them.
+- Touch targets are large enough to hit, with space between them. A target under 24 by 24 CSS px
+  fails WCAG 2.2 level AA (2.5.8), unless the space around it makes up for the size. 44 by 44 CSS
+  px is the comfortable target (level AAA, 2.5.5).
 - Keyboard: every control can be reached and used, in a sensible order, with a visible focus mark.
 - Images that carry meaning have a text alternative. Controls have accessible names.
 - Text can be enlarged without content being cut off.
