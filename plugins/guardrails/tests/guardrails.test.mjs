@@ -791,6 +791,13 @@ test("destructive commands: the catastrophe is refused, the everyday twin is not
   for (const command of ["rm -rf vendor/lib/.git", "rm -rf vendor", "rm -rf *", "cd dist && rm -rf .", "rm -rf ./.cache"])
     assert.equal(danger(command), null, `should allow: ${command}`);
   assert.equal(danger("Remove-Item dist -Recurse -Force", "powershell"), null);
+
+  // Windows can spell the same folder with short names (RUNNER~1). It is still the repository.
+  if (process.platform === "win32") {
+    const short = unix(execFileSync("cmd", ["/c", "for %I in (.) do @echo %~sI"], { cwd: repo, encoding: "utf8" }).trim());
+    assert.ok(dangerIn(callsIn("rm -rf .", short)), `should refuse: rm -rf . in ${short}`);
+    assert.equal(dangerIn(callsIn("rm -rf vendor/lib/.git", short)), null);
+  }
 });
 
 test("the agent cannot approve, forge a record, or quietly change the rules", () => {

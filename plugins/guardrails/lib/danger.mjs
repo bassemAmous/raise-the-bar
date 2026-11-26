@@ -21,6 +21,18 @@ function isRecursive(arg) {
 }
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+/** One spelling for a folder: links and Windows short names (RUNNER~1) resolved, lower case. */
+function canonical(place) {
+  try {
+    return slash(fs.realpathSync.native(place)).toLowerCase();
+  } catch {
+    return slash(place).replace(/\/+$/, "").toLowerCase();
+  }
+}
+/** True when `inner` is `outer` or lies below it. */
+const within = (inner, outer) => `${canonical(inner)}/`.startsWith(`${canonical(outer)}/`);
+
 const isBigPlace = (place) =>
   place === "/" || /^[a-z]:\/?$/i.test(place) || same(place, slash(os.homedir())) || SYSTEM_FOLDERS.has(place.toLowerCase());
 
@@ -38,7 +50,7 @@ function isHistory(target, folder) {
   const root = folder && fs.existsSync(folder) ? repoRoot(folder) : null;
   if (!root) return true;
   const owner = slash(path.dirname(full));
-  return !owner.toLowerCase().startsWith(`${root.toLowerCase()}/`);
+  return canonical(owner) === canonical(root) || !within(owner, root);
 }
 
 /** The top of the repository a folder is in, or null. */
@@ -57,7 +69,8 @@ function isCatastrophic(target, call, takesHidden) {
     if (!call.folder) return false;
     if (isBigPlace(call.folder)) return true;
     // Hidden files go with .* and with PowerShell's -Force: at the top of a repository, .git goes too.
-    return (hidden || takesHidden || itself) && same(repoAt(call.folder) ?? "", call.folder);
+    const top = repoAt(call.folder);
+    return (hidden || takesHidden || itself) && top !== null && canonical(top) === canonical(call.folder);
   }
   if (wanted === "~" || isBigPlace(wanted)) return true;
   if (process.platform === "win32" && /^\/[a-z]$/i.test(wanted)) return true; // Git Bash drive root
@@ -68,7 +81,7 @@ function isCatastrophic(target, call, takesHidden) {
   if (isBigPlace(full)) return true;
   // The repository the command runs in, or a folder above it: the history goes with it.
   const root = repoAt(call.folder);
-  return root !== null && `${root.toLowerCase()}/`.startsWith(`${full.toLowerCase()}/`);
+  return root !== null && within(root, full);
 }
 
 function deletesEverything(call) {
