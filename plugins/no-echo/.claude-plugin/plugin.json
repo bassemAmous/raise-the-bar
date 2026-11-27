@@ -1,6 +1,6 @@
 {
   "name": "no-echo",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Decision skills where opposed viewpoints argue one question and the dissent is kept: let-them-fight, rewrite-or-regret, but-should-we and what-could-go-wrong, with a read-only council seat agent. And story-or-snore, which turns the pitch into a story people stay awake for, with a script that checks the story still fits the facts. Formerly the council plugin.",
   "author": {
     "name": "bassemAmous",

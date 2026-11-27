@@ -3,6 +3,23 @@
 A plugin's `version` changes whenever its files change. People who already installed a plugin get
 the new copy only then.
 
+## 0.3.2
+
+`no-echo` 0.3.2 and `no-slop` 0.3.1. `no-yolo` stays at 0.3.0.
+
+### Fixed
+
+- The scripts `check-story.mjs`, `make-mutants.mjs`, `kill-matrix.mjs` and `check-repo.mjs` exited 0
+  without running when their folder was reached through a link (the macOS temp folder, a Windows
+  junction, a linked plugin folder). A silent exit read as a pass. They now compare real paths. A
+  test runs `check-repo.mjs` through a link.
+- `make-mutants.mjs` (from 0.3.1's follow-up commit): a mutant name made only of dots, or a bundle
+  path that leaves the package, is refused before anything is deleted or written. `no-slop` now
+  carries the version change that commit missed.
+- `check-story.mjs` slowed to seconds on a talk with thousands of "(" and no ")". Stage directions
+  are now removed in one pass.
+- `check-repo.mjs` refuses a `--base` that starts with "-", so it never reaches git as an option.
+
 ## 0.3.1
 
 `no-echo` and the marketplace file. `no-yolo` and `no-slop` stay at 0.3.0.

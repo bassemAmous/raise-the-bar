@@ -98,7 +98,22 @@ const SAYS_EXAMPLE = /\b(?:examples?|demo|sample|invented|made[- ]up|pretend|ima
 
 const wordsOf = (text) => text.match(/[\p{L}\p{N}]+/gu) ?? [];
 const keyWordsOf = (text) => wordsOf(text.toLowerCase()).filter((word) => word.length >= 3 && !SMALL_WORDS.has(word));
-const withoutStageDirections = (text) => text.replace(/\([^)]*\)/g, " ");
+/**
+ * Replaces every "(...)" with what `replace` returns for it, in one pass. The regex /\([^)]*\)/g
+ * rescans to the end of the text from every "(" that has no ")", which takes seconds on a long text.
+ */
+function replaceParens(text, replace) {
+  let out = "";
+  let from = 0;
+  for (let open = text.indexOf("(", from); open !== -1; open = text.indexOf("(", from)) {
+    const close = text.indexOf(")", open + 1);
+    if (close === -1) break;
+    out += text.slice(from, open) + replace(text.slice(open, close + 1));
+    from = close + 1;
+  }
+  return out + text.slice(from);
+}
+const withoutStageDirections = (text) => replaceParens(text, () => " ");
 const heardIn = (beat) => `${beat.lines.join(" ")} ${withoutStageDirections(beat.say)}`;
 const isPlain = (element) => /^\(?plain\)?$/i.test(element);
 const isOpen = (element) => element === "" || /^\(?no match\)?$/i.test(element);
@@ -389,7 +404,7 @@ function heardParts(beat) {
   return ["lines", "say"].map((field) => {
     const rows = beat.rows.filter((row) => row.field === field);
     const joined = rows.map((row) => row.text).join(" ").replace(/[‘’]/g, "'");
-    const text = field === "say" ? joined.replace(/\([^)]*\)/g, blank) : joined;
+    const text = field === "say" ? replaceParens(joined, blank) : joined;
     const rowNumberAt = (index) => {
       let end = 0;
       return (rows.find((row) => (end += row.text.length + 1) > index) ?? rows.at(-1)).rowNumber;
@@ -557,7 +572,9 @@ function main(args) {
   return findings.length ? 1 : 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Real paths on both sides: a folder reached through a link (macOS /var, a Windows junction) would
+// otherwise make the script exit 0 without running.
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   // A crash must not look like a finding. Exit code 1 is kept for findings only.
   try {
     process.exitCode = main(process.argv.slice(2));

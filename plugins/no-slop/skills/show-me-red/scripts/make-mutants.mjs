@@ -106,7 +106,9 @@ function main() {
   for (const { name, fingerprint } of builds) process.stdout.write(`${name} ${fingerprint}\n`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Real paths on both sides: a folder reached through a link (macOS /var, a Windows junction) would
+// otherwise make the script exit 0 without running.
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   try {
     main();
   } catch (error) {

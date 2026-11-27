@@ -110,3 +110,25 @@ test("an old name must point at a plugin that exists and must say its new name",
   assert.equal(silent.code, 1, silent.out);
   assert.match(silent.err, /"keeper" is an old name of plugins\/watchdog, and its description does not say "watchdog"/);
 });
+
+test("the script still runs when its folder is reached through a link", () => {
+  const repo = newRepo();
+  plugin(repo, "keeper");
+  market(repo, [entry("keeper")]);
+  // macOS hands out its temp folder through a link (/var -> /private/var); a junction does the same on Windows.
+  const link = path.join(ROOT, `link-${repoCount}`);
+  fs.symlinkSync(repo, link, process.platform === "win32" ? "junction" : "dir");
+  const result = spawnSync(process.execPath, [path.join(link, "scripts", "check-repo.mjs")], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /check-repo: 1 skills, 1 plugins\. Clean\./, "the script must run, not exit 0 in silence");
+});
+
+test("a base that starts with a dash is refused before it reaches git", () => {
+  const repo = newRepo();
+  plugin(repo, "keeper");
+  market(repo, [entry("keeper")]);
+  const result = check(repo, "--base", "--output=x");
+  assert.equal(result.code, 2, result.out);
+  assert.match(result.err, /usage: node scripts\/check-repo\.mjs/);
+  assert.equal(fs.existsSync(path.join(repo, "x")), false);
+});

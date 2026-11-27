@@ -150,7 +150,8 @@ function checkVersionBumps(base) {
 function main() {
   const at = process.argv.indexOf("--base");
   const base = at === -1 ? null : process.argv[at + 1];
-  if (at !== -1 && !base) {
+  // A base that starts with "-" would reach git as an option, not a ref.
+  if (at !== -1 && (!base || base.startsWith("-"))) {
     process.stderr.write("usage: node scripts/check-repo.mjs [--base <ref>]\n");
     process.exit(2);
   }
@@ -166,7 +167,9 @@ function main() {
   process.stdout.write(`check-repo: ${count} skills, ${plugins().length} plugins${kept}${base ? `, versions checked against ${base}` : ""}. Clean.\n`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Real paths on both sides: a folder reached through a link (macOS /var, a Windows junction) would
+// otherwise make the script exit 0 without running.
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   try {
     main();
   } catch (error) {

@@ -380,3 +380,11 @@ test("a beat may run 10% over its seconds, and not a second more", () => {
   assert.equal(over.code, 1, over.out);
   assert.match(over.out, /OVER TIME beat 2 \(The loss\): 131 spoken words need 56 s at 140 words a minute\. The beat has 50 s\./);
 });
+
+test("a long line of open brackets with no close is checked in well under a second", () => {
+  // The old /\([^)]*\)/g pattern rescanned the text from every "(" and took seconds here.
+  const brackets = [LOSS[0], LOSS[1], `Say: ${"(".repeat(40000)}`];
+  const started = performance.now();
+  run(talk({ settings: ["Product: Pretendly", "Limit: 1:30"], beats: [HOOK, brackets, END] }));
+  assert.ok(performance.now() - started < 1500, "the check must not slow down on unclosed brackets");
+});
