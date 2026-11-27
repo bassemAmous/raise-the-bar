@@ -47,12 +47,12 @@
   <text x="48" y="198" class="sans" font-size="19" font-weight="700" fill="#f0f6fc">Keep the decision to ship.</text>
 
   <g class="mono" font-size="12.5" fill="#e6edf3">
-    <rect x="48" y="222" width="102" height="27" rx="13.5" fill="#161b22" stroke="#30363d"/>
-    <text x="99" y="240" text-anchor="middle">guardrails</text>
-    <rect x="160" y="222" width="64" height="27" rx="13.5" fill="#161b22" stroke="#30363d"/>
-    <text x="192" y="240" text-anchor="middle">craft</text>
-    <rect x="234" y="222" width="80" height="27" rx="13.5" fill="#161b22" stroke="#30363d"/>
-    <text x="274" y="240" text-anchor="middle">council</text>
+    <rect x="48" y="222" width="80" height="27" rx="13.5" fill="#161b22" stroke="#30363d"/>
+    <text x="88" y="240" text-anchor="middle">no-yolo</text>
+    <rect x="138" y="222" width="80" height="27" rx="13.5" fill="#161b22" stroke="#30363d"/>
+    <text x="178" y="240" text-anchor="middle">no-slop</text>
+    <rect x="228" y="222" width="80" height="27" rx="13.5" fill="#161b22" stroke="#30363d"/>
+    <text x="268" y="240" text-anchor="middle">no-echo</text>
   </g>
 
   <!-- Five pieces of agent work. Three reach the bar. -->

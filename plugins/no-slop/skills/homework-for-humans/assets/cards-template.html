@@ -1,0 +1,66 @@
+<!doctype html>
+<!--
+  Test cards template. Copy this file, then replace every {{...}} placeholder.
+  One <section class="card"> per behaviour; one <li> per step; one <tr> per result to tick.
+  Everything is inline: no outside scripts or fonts, so it opens offline and prints cleanly.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{Title}} test cards</title>
+<style>
+  :root { --ink: #1d1d1f; --muted: #5f5f66; --line: #d9d9de; --pass: #1f7a3a; --fail: #b3261e; --bg: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #f2f2f5; --muted: #a8a8b0; --line: #3a3a40; --bg: #141416; } }
+  body { margin: 0 auto; max-width: 820px; padding: 24px 16px; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .meta { color: var(--muted); margin: 0 0 24px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 0 0 20px; break-inside: avoid; }
+  .card h2 { font-size: 1.15rem; margin: 0 0 8px; }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 12px; color: var(--muted); }
+  .facts dt { font-weight: 600; }
+  ol { padding-left: 22px; }
+  ol li { margin: 4px 0; }
+  code { font: 0.95em ui-monospace, Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { border-top: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+  .tick { white-space: nowrap; }
+  .tick label { margin-right: 10px; }
+  .pass { color: var(--pass); font-weight: 600; }
+  .fail { color: var(--fail); font-weight: 600; }
+  .seen { width: 100%; min-height: 2.2em; border: 1px dashed var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+  @media print { body { max-width: none; } .card { border-color: #999; } }
+</style>
+</head>
+<body>
+<h1>{{Title}}</h1>
+<p class="meta">For: {{role, never a name}} · Device: {{device and browser}} · Build: {{version or commit}} · Date: {{date}}</p>
+
+<section class="card">
+  <h2>1. {{What this card checks}}</h2>
+  <dl class="facts">
+    <dt>Who</dt><dd>{{role}}</dd>
+    <dt>Where</dt><dd>{{device}}, test account: {{account role}} (login kept in {{where}})</dd>
+    <dt>Before you start</dt><dd>{{what must be true first, or "nothing"}}</dd>
+    <dt>Needs card</dt><dd>{{earlier card number, or "none"}}</dd>
+  </dl>
+  <ol>
+    <li>Open <code>https://APP-ADDRESS/{{path}}</code>.</li>
+    <li>Tap <strong>{{exact button label}}</strong>.</li>
+    <li>Type <code>{{exact value}}</code> in the <strong>{{exact field label}}</strong> box.</li>
+  </ol>
+  <table>
+    <thead><tr><th>You should see</th><th>Result</th><th>What you saw instead</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>{{exact text or state that must appear}}</td>
+        <td class="tick"><label class="pass"><input type="checkbox"> PASS</label><label class="fail"><input type="checkbox"> FAIL</label></td>
+        <td><textarea class="seen" aria-label="What you saw instead"></textarea></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+</body>
+</html>

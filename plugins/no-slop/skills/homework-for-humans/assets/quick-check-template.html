@@ -1,0 +1,34 @@
+<!doctype html>
+<!--
+  Quick check template: one short list for one change. Replace every {{...}} placeholder.
+  One <li> per result to tick. Inline only, so it opens offline and prints on one page.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{Change}} quick check</title>
+<style>
+  :root { --ink: #1d1d1f; --muted: #5f5f66; --line: #d9d9de; --bg: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #f2f2f5; --muted: #a8a8b0; --line: #3a3a40; --bg: #141416; } }
+  body { margin: 0 auto; max-width: 680px; padding: 24px 16px; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .meta { color: var(--muted); margin: 0 0 20px; }
+  ul { list-style: none; padding: 0; }
+  li { border-top: 1px solid var(--line); padding: 10px 0; }
+  li label { display: inline-block; margin-right: 12px; font-weight: 600; }
+  code { font: 0.95em ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<h1>{{Change, in plain words}}</h1>
+<p class="meta">For: {{role}} · Open: <code>https://APP-ADDRESS/{{path}}</code> · Build: {{version or commit}}</p>
+<ul>
+  <li>
+    {{One action, then the exact thing to see}}<br>
+    <label><input type="checkbox"> PASS</label><label><input type="checkbox"> FAIL</label> Saw instead: ________________
+  </li>
+</ul>
+</body>
+</html>

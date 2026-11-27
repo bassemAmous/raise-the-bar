@@ -3,6 +3,71 @@
 A plugin's `version` changes whenever its files change. People who already installed a plugin get
 the new copy only then.
 
+## 0.3.0
+
+All three plugins. **Breaking: the plugins and skills have new names, so the old slash commands
+stop working.** Eleven skills are new, and some existing skills gained a few rules (listed below).
+
+- **New plugin names.** `guardrails` is now `no-yolo`, `craft` is now `no-slop` and `council` is
+  now `no-echo`. Install them again under the new names:
+  `/plugin install no-yolo@raise-the-bar`, `/plugin install no-slop@raise-the-bar`,
+  `/plugin install no-echo@raise-the-bar`, and uninstall the old ones.
+- **New skill names.** `done-check` is `done-done`, `push-review` is `you-shall-not-push`,
+  `readonly-audit` is `who-let-you-in`, `build-it` is `idea-to-ta-da`, `clean-code` is `spaghetti-meter`,
+  `performance` is `find-the-snail`, `bug-hunt` is `most-wanted-bugs`, `ux-review` is `pixel-police`,
+  `worktree-first` is `main-is-lava`, `bug-retro` is `bug-autopsy`, `later` is `future-me-problem`,
+  `strategy` is `but-should-we`, `boardroom` is `let-them-fight`, `senior-council` is `rewrite-or-regret` and
+  `red-team` is `what-could-go-wrong`. Each skill still answers to its old name in plain words. The
+  full table is in the README.
+- **The guard keeps its name.** The no-yolo plugin installs the guardrails guard. The
+  `guardrails` command, `guardrails.config.json`, the `BLOCKED by guardrails` messages, the
+  `guardrails:allow-secret` mark and the mark inside installed git hooks are unchanged, so
+  existing setups keep working. A refused push now names the skill `no-yolo:you-shall-not-push`.
+- **The approval refusal knows the new folder name.** The agent running `approve` through the
+  `cli.mjs` of another installed copy of the plugin was recognised by the word `guardrails` in
+  its path. That copy now sits in a folder named `no-yolo`, so that word is recognised too.
+  Covered by a test.
+
+### Added
+
+- `no-slop:show-me-red`: proves each test can fail, with a kill table. Ships `kill-matrix.mjs` and
+  `make-mutants.mjs`, each covered by `scripts.test.mjs`, run in CI.
+- `no-slop:you-had-one-job`: holds the work against the ask, clause by clause, all of it and only it.
+- `no-slop:message-in-a-bottle`: a handoff note a fresh session can trust, with a start check.
+- `no-slop:not-another-wip`: commit messages and pull request text written from the pushed branch.
+- `no-slop:no-great-question`: plain replies, answer first.
+- `no-slop:no-comment`: comments that say why, never what.
+- `no-slop:homework-for-humans`: tick-box test cards for a person, with two HTML templates.
+- `no-slop:lost-in-translation`: missing, stale or untranslated text in every supported language.
+- `no-slop:skill-issue`: improves a skill from real runs, size flat or down.
+- `no-yolo:mind-the-headers`: read-only check of the security headers a live site sends.
+- `no-echo:story-or-snore`: turns a pitch or talk into a story that carries the content. Offers 4
+  to 6 stories mapped part by part to the product, stops for the pick, then writes a timed talk
+  file. Ships `check-story.mjs`, covered by `check-story.test.mjs`, run in CI: it fails on a story
+  element with two meanings, an open gap, a stock image, words that do not fit the time, a word
+  the person asked to avoid and an ending with no callback. The deck look and the optional
+  explainer video are described with no script; the video needs Playwright and ffmpeg, installed
+  by the person.
+
+### Changed
+
+- `done-done`: a real page, not a health check; the production build served once; the variant
+  trap; a check not run counts as red; skipped tests searched for; a deploy is done when the live
+  file matches the build.
+- `you-shall-not-push`: what this push makes stale; a repeat push is a new gate; each commit
+  green; environment variables exist before the code reads them; explicit staging, draft pull
+  requests, never a merge.
+- `who-let-you-in`: audits the deployed commit; never proposes rotating an encryption key while
+  its data exists; names each question class not covered.
+- `most-wanted-bugs`: a skeptic pass on a clean round, counts that balance, a sibling sweep before
+  a round closes, behaviour measured and never inferred.
+- `pixel-police`: says "UX pass not run" without a running app; back-office checklist.
+- `idea-to-ta-da`: a replacement keeps every settled element or flags its removal.
+- `spaghetti-meter`: a rule group for signs of machine-written code.
+- `bug-autopsy`: also after a mistake the agent made; never adapt a test to the bug.
+- `main-is-lava`: monorepo aliases resolved inside the worktree; a branch-stack reference.
+- `rewrite-or-regret`: a pre-mortem line in the output.
+
 ## 0.2.1
 
 `guardrails` only. `craft` and `council` stay at 0.2.0. After an independent review that checked

@@ -7,44 +7,52 @@
   },
   "plugins": [
     {
-      "name": "guardrails",
-      "source": "./plugins/guardrails",
-      "description": "Guard hooks for agent-written code: secrets stopped at commit, no push to a protected branch without a recorded test pass and review of the exact code, and production locked until a human approves. With a second check in git's own pre-push hook, a read-only reviewer agent and three review skills.",
+      "name": "no-yolo",
+      "source": "./plugins/no-yolo",
+      "description": "Guard hooks for agent-written code (the guardrails guard): secrets stopped at commit, no push to a protected branch without a recorded test pass and review of the exact code, and production locked until a human approves. With a second check in git's own pre-push hook, a read-only reviewer agent and four skills: you-shall-not-push, done-done, who-let-you-in and mind-the-headers. Formerly the guardrails plugin.",
       "category": "development",
       "keywords": [
+        "no-yolo",
         "guardrails",
         "hooks",
         "security",
         "review",
         "approval",
-        "git"
+        "git",
+        "headers"
       ]
     },
     {
-      "name": "craft",
-      "source": "./plugins/craft",
-      "description": "Engineering skills that hold agent work to a senior bar: build-it, clean-code, performance, bug-hunt, ux-review, worktree-first, bug-retro and later, with a read-only reviewer agent.",
+      "name": "no-slop",
+      "source": "./plugins/no-slop",
+      "description": "Engineering skills that hold agent work to a senior bar: idea-to-ta-da, spaghetti-meter, find-the-snail, most-wanted-bugs, show-me-red, you-had-one-job, pixel-police, main-is-lava, bug-autopsy, future-me-problem, message-in-a-bottle, not-another-wip, no-great-question, no-comment, homework-for-humans, lost-in-translation and skill-issue, with a read-only reviewer agent. Formerly the craft plugin.",
       "category": "development",
       "keywords": [
+        "no-slop",
         "skills",
         "code-quality",
-        "performance",
         "testing",
         "ux",
-        "worktree"
+        "worktree",
+        "i18n",
+        "writing"
       ]
     },
     {
-      "name": "council",
-      "source": "./plugins/council",
-      "description": "Decision skills where opposed viewpoints argue one question and the dissent is kept: boardroom, senior-council, strategy and red-team, with a read-only council seat agent.",
+      "name": "no-echo",
+      "source": "./plugins/no-echo",
+      "description": "Decision skills where opposed viewpoints argue one question and the dissent is kept: let-them-fight, rewrite-or-regret, but-should-we and what-could-go-wrong, with a read-only council seat agent. And story-or-snore, which turns the pitch into a story people stay awake for, with a script that checks the story still fits the facts. Formerly the council plugin.",
       "category": "development",
       "keywords": [
+        "no-echo",
         "skills",
         "decisions",
         "strategy",
         "product",
-        "red-team"
+        "red-team",
+        "pitch",
+        "storytelling",
+        "presentation"
       ]
     }
   ]

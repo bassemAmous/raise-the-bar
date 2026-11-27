@@ -1,0 +1,21 @@
+{
+  "name": "no-yolo",
+  "version": "0.3.0",
+  "description": "Guard hooks for agent-written code (the guardrails guard): secrets stopped at commit, no push to a protected branch without a recorded test pass and review of the exact code, and production locked until a human approves. With a second check in git's own pre-push hook, a read-only reviewer agent and four skills: you-shall-not-push, done-done, who-let-you-in and mind-the-headers. Formerly the guardrails plugin.",
+  "author": {
+    "name": "bassemAmous",
+    "url": "https://github.com/bassemAmous"
+  },
+  "homepage": "https://github.com/bassemAmous/raise-the-bar",
+  "repository": "https://github.com/bassemAmous/raise-the-bar",
+  "license": "MIT",
+  "keywords": [
+    "no-yolo",
+    "guardrails",
+    "hooks",
+    "security",
+    "review",
+    "approval",
+    "git"
+  ]
+}

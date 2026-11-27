@@ -1,0 +1,21 @@
+{
+  "name": "no-slop",
+  "version": "0.3.0",
+  "description": "Engineering skills that hold agent work to a senior bar: idea-to-ta-da, spaghetti-meter, find-the-snail, most-wanted-bugs, show-me-red, you-had-one-job, pixel-police, main-is-lava, bug-autopsy, future-me-problem, message-in-a-bottle, not-another-wip, no-great-question, no-comment, homework-for-humans, lost-in-translation and skill-issue, with a read-only reviewer agent. Formerly the craft plugin.",
+  "author": {
+    "name": "bassemAmous",
+    "url": "https://github.com/bassemAmous"
+  },
+  "homepage": "https://github.com/bassemAmous/raise-the-bar",
+  "repository": "https://github.com/bassemAmous/raise-the-bar",
+  "license": "MIT",
+  "keywords": [
+    "no-slop",
+    "skills",
+    "code-quality",
+    "performance",
+    "testing",
+    "ux",
+    "worktree"
+  ]
+}

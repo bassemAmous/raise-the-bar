@@ -22,9 +22,13 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Guard hook tests
-        run: node --test plugins/guardrails/tests/guardrails.test.mjs
-      - name: Council number check tests
-        run: node --test plugins/council/skills/boardroom/scripts/check-numbers.test.mjs
+        run: node --test plugins/no-yolo/tests/guardrails.test.mjs
+      - name: let-them-fight number check tests
+        run: node --test plugins/no-echo/skills/let-them-fight/scripts/check-numbers.test.mjs
+      - name: story-or-snore story check tests
+        run: node --test plugins/no-echo/skills/story-or-snore/scripts/check-story.test.mjs
+      - name: show-me-red script tests
+        run: node --test plugins/no-slop/skills/show-me-red/scripts/scripts.test.mjs
 
   repository:
     runs-on: ubuntu-latest
