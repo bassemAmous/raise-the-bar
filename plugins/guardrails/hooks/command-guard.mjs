@@ -22,6 +22,7 @@ try {
     cwd,
     transcriptPath: payload.transcript_path,
     shell: payload.tool_name === "PowerShell" ? "powershell" : "bash",
+    live: true,
   });
   decide(verdict.decision, verdict.reason);
 } catch (error) {

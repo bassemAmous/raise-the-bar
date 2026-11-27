@@ -95,10 +95,17 @@ function deletesEverything(call) {
   return call.args.some((arg) => !arg.startsWith("-") && !/^\/[sq]$/i.test(arg) && isCatastrophic(arg, call, takesHidden));
 }
 
-function skipsHooks(git) {
+export const SKIPS_HOOKS = "This skips the checks that protect this repository (--no-verify, -n, or a replaced hooks folder).";
+
+/** True when a commit, a push or a merge is told to run without git's hooks. */
+export function skipsHooks(git) {
   if (!git || !["commit", "push", "merge"].includes(git.verb)) return false;
   if (git.globals.some((setting) => /^core\.hookspath=/i.test(setting))) return true;
-  return git.verb === "commit" ? readCommit(git.args).noVerify : git.args.includes("--no-verify");
+  if (git.verb === "commit") return readCommit(git.args).noVerify;
+  // git takes a long option cut short: --no-verif is --no-verify.
+  const end = git.args.indexOf("--");
+  const flags = end === -1 ? git.args : git.args.slice(0, end);
+  return flags.some((arg) => arg.length >= 6 && "--no-verify".startsWith(arg));
 }
 
 // Programs whose arguments are a message or a search pattern: text about a command, not a command.
@@ -155,7 +162,7 @@ export const DANGER_RULES = [
   {
     id: "skip-hooks",
     test: (call, git) => skipsHooks(git),
-    why: "This skips the checks that protect this repository (--no-verify, -n, or a replaced hooks folder).",
+    why: SKIPS_HOOKS,
   },
   { id: "drop-database", test: dropsDatabase, why: "This drops a whole database." },
   {

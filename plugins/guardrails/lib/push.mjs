@@ -1,9 +1,14 @@
 // Reads `git push` commands: which commit goes to which branch, and how.
 import fs from "node:fs";
-import { commitOf, tryGit } from "./core.mjs";
-import { callsIn, gitCall } from "./shell.mjs";
+import { PLAIN_DIFF, commitOf, tryGit } from "./core.mjs";
+import { callsIn, gitCall, longOptions, unescaped, withNegations } from "./shell.mjs";
 
-const OPTIONS_WITH_VALUE = new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]);
+const PUSH_LONG = withNegations([
+  "all", "atomic", "branches", "delete", "dry-run", "exec", "follow-tags", "force", "force-if-includes",
+  "force-with-lease", "ipv4", "ipv6", "mirror", "porcelain", "progress", "prune", "push-option", "quiet",
+  "receive-pack", "recurse-submodules", "repo", "set-upstream", "signed", "tags", "thin", "verbose", "verify",
+]);
+const OPTIONS_WITH_VALUE = new Set(["--push-option", "--repo", "--receive-pack", "--exec", "--recurse-submodules"]);
 const UNREADABLE = /[$`%]/;
 // Two common ways to write "the branch I am on". They are read as that, not as a variable.
 const CURRENT_BRANCH = /^\$\(\s*git\s+(?:branch\s+--show-current|rev-parse\s+--abbrev-ref\s+HEAD|symbolic-ref\s+--short\s+HEAD)\s*\)$/;
@@ -63,16 +68,24 @@ export function readPush(git) {
       break;
     }
     if (arg.startsWith("--")) {
-      if (arg === "--repo") repoOption = git.args[++i] ?? null;
-      else if (arg.startsWith("--repo=")) repoOption = arg.slice(7);
-      else if (OPTIONS_WITH_VALUE.has(arg)) i++;
-      else if (arg.startsWith("--force")) push.force = true;
-      else if (arg === "--mirror") push.force = all = prune = true;
-      else if (arg === "--prune") prune = true;
-      else if (arg === "--dry-run") push.dryRun = true;
-      else if (arg === "--delete") deleteMode = true;
-      else if (arg === "--all" || arg === "--branches") all = true;
-      else if (arg === "--tags") tagsOnly = true;
+      // git takes a long option cut short when it fits only one: --delet is --delete. A word that
+      // fits several is refused by git, and is read here as the riskiest of them.
+      const equals = arg.indexOf("=");
+      const fits = longOptions(arg, PUSH_LONG);
+      const name = fits.length === 1 ? fits[0] : equals === -1 ? arg : arg.slice(0, equals);
+      const means = (option) => name === option || fits.includes(option);
+      if (OPTIONS_WITH_VALUE.has(name)) {
+        const value = equals === -1 ? (git.args[++i] ?? null) : arg.slice(equals + 1);
+        if (name === "--repo") repoOption = value;
+      }
+      if (name.startsWith("--force") || fits.some((option) => option.startsWith("--force"))) push.force = true;
+      if (means("--mirror")) push.force = all = prune = true;
+      if (means("--prune")) prune = true;
+      if (means("--delete")) deleteMode = true;
+      if (means("--all") || means("--branches")) all = true;
+      // These two make a push do less, so only the exact meaning counts.
+      if (name === "--dry-run") push.dryRun = true;
+      if (name === "--tags") tagsOnly = true;
       continue;
     }
     if (arg.startsWith("-") && arg.length > 1) {
@@ -91,6 +104,9 @@ export function readPush(git) {
     }
     positional.push(arg);
   }
+  // The name of a branch never holds a backslash, so `ma\in` is read the way Bash sends it: main.
+  for (let i = 0; i < positional.length; i++)
+    positional[i] = i === 0 ? unescaped(positional[i]) : positional[i].split("\\").join("");
   if (positional.some((word, index) => UNREADABLE.test(word) && !(index > 0 && CURRENT_BRANCH.test(word))))
     push.unreadable = true;
   if (folder === null || !fs.existsSync(folder)) return push;
@@ -203,7 +219,7 @@ export function resolveTarget(push, target) {
   const base = commitOf(`refs/remotes/${push.remote}/${target.dst}`, push.folder);
   let changed = null;
   if (base) {
-    const names = tryGit(["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", base, head], push.folder);
+    const names = tryGit([...PLAIN_DIFF, "diff", "--name-only", "--no-renames", base, head], push.folder);
     if (names !== null) changed = lines(names);
   }
   return { head, base, changed };

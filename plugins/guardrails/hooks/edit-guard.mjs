@@ -13,7 +13,7 @@ try {
   const input = payload.tool_input ?? {};
   cwd = payload.cwd || cwd;
   filePath = String(input.file_path ?? input.notebook_path ?? "");
-  const verdict = judgeEdit({ filePath, transcriptPath: payload.transcript_path });
+  const verdict = judgeEdit({ filePath, transcriptPath: payload.transcript_path, cwd });
   decide(verdict.decision, verdict.reason);
 } catch (error) {
   const why = `the edit guard failed: ${error?.message ?? error}`;

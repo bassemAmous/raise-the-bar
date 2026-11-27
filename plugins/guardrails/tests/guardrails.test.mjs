@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isTypedByHuman, typedApproval } from "../lib/approval.mjs";
 import { globToRegExp, loadConfig, startTimeBudget } from "../lib/core.mjs";
 import { dangerIn } from "../lib/danger.mjs";
-import { HOOK_MARK, hookState, hookText } from "../lib/githook.mjs";
+import { HOOK_MARK, POINTER_NAME, hookLines, hookState, hookText } from "../lib/githook.mjs";
 import { detectTestCommand } from "../lib/testcommand.mjs";
 import { judgeCommand, judgeEdit } from "../lib/judge.mjs";
 import { gitCalls, pushesIn } from "../lib/push.mjs";
@@ -31,6 +31,12 @@ const FAKE_PASSWORD = "S3cr3t" + "Passw0rd";
 // The tests run git as a clean machine would: settings handed to git through the environment
 // (a hooks folder, an alias) belong to the person's own setup, not to the code under test.
 for (const name of Object.keys(process.env)) if (/^GIT_CONFIG_/.test(name)) delete process.env[name];
+
+// The second check is for the agent, and the agent's shell carries a marker. The tests say which one
+// a push comes from, so they give the same answer on a laptop, inside an agent and on a build server.
+const MARKERS = ["CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_ENTRYPOINT"];
+const AS_PERSON = Object.fromEntries(Object.entries(process.env).filter(([name]) => !MARKERS.includes(name)));
+const AS_AGENT = { ...AS_PERSON, CLAUDECODE: "1" };
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 const unix = (file) => file.split("\\").join("/");
@@ -1262,7 +1268,7 @@ test("destructive commands: longer flag groups and the short database forms", ()
 
 test("git checks the push a second time, with the commit and the branch it really sends", () => {
   const repo = makeRepo({ productionBranches: [] });
-  const push = (...args) => spawnSync("git", ["push", ...args], { cwd: repo, encoding: "utf8" });
+  const push = (...args) => spawnSync("git", ["push", ...args], { cwd: repo, encoding: "utf8", env: AS_AGENT });
   const remoteMain = () => sh(repo, "ls-remote", "origin", "refs/heads/main").split(/\s+/)[0];
   assert.match(cli(repo, "status").stdout, /pre-push hook +not installed/);
   const installed = cli(repo, "install-hook");
@@ -1306,7 +1312,7 @@ test("git checks the push a second time, with the commit and the branch it reall
   assert.notEqual(lost.status, 0);
   assert.match(lost.stderr, /the guard has moved/);
   assert.match(lost.stderr, /not checked, so it is not sent/);
-  assert.match(judge(repo, "git push origin main").reason, NOT_READY);
+  assert.match(judgeCommand({ command: "git push origin main", cwd: repo, live: true }).reason, NOT_READY);
   assert.equal(hookState(repo), "current", "the guard wrote the hook again");
 
   // Another tool's hook is never replaced.
@@ -1315,7 +1321,7 @@ test("git checks the push a second time, with the commit and the branch it reall
   fs.writeFileSync(theirs, "#!/bin/sh\nexit 0\n");
   const kept = cli(other, "install-hook");
   assert.equal(kept.status, 1);
-  assert.match(kept.stderr, /already holds another hook/);
+  assert.match(kept.stderr, /holds another tool's hook\. It is kept as it is\./);
   assert.match(kept.stderr, /gate "\$@" \|\| exit 1/);
   assert.equal(fs.readFileSync(theirs, "utf8"), "#!/bin/sh\nexit 0\n");
 });
@@ -1329,14 +1335,14 @@ test("an approval typed in the chat reaches the second check, and ends on time",
   );
   assert.equal(record.via, "chat");
   assert.ok(Date.parse(record.expiresAt) > Date.now());
-  const sent = spawnSync("git", ["push", "origin", "main"], { cwd: repo, encoding: "utf8" });
+  const sent = spawnSync("git", ["push", "origin", "main"], { cwd: repo, encoding: "utf8", env: AS_AGENT });
   assert.equal(sent.status, 0, sent.stderr);
   assert.equal(sh(repo, "ls-remote", "origin", "refs/heads/main").split(/\s+/)[0], head);
   // A commit with tests and review but no approval is held by both checks.
   const next = commit(repo, "app.js", "export const answer = 43;\n");
   assert.equal(cli(repo, "test").status, 0);
   assert.equal(cli(repo, "review-stamp", "--report", passingReport(repo, next)).status, 0);
-  const held = spawnSync("git", ["push", "origin", "main"], { cwd: repo, encoding: "utf8" });
+  const held = spawnSync("git", ["push", "origin", "main"], { cwd: repo, encoding: "utf8", env: AS_AGENT });
   assert.notEqual(held.status, 0);
   assert.match(held.stderr, /approved by a human: NO/);
 });
@@ -1375,4 +1381,337 @@ test("a guard that fails refuses what can ship code, says which check failed, an
   const list = run("ls -la");
   assert.equal(list.status, 0);
   assert.equal(list.stdout, "", "a line that cannot ship code is not blocked by a bug in the guard");
+});
+
+test("a long option cut short is read the way git reads it", () => {
+  const repo = makeRepo({ protectedBranches: ["main", "staging"], productionBranches: [] });
+  sh(repo, "branch", "staging");
+  sh(repo, "push", "origin", "staging");
+  commit(repo, "app.js", "export const answer = 42;\n");
+  // git takes --delet for --delete and --no-verif for --no-verify. So does the guard.
+  for (const command of [
+    "git push --delet origin staging",
+    "git push --de origin staging",
+    "git push --mirr origin",
+    "git push --prun origin",
+    "git push --al origin",
+    "git push --recurse-submodules no origin main",
+  ])
+    assert.equal(verdictOf(repo, command), "deny", command);
+  for (const command of [
+    "git push --no-verif origin HEAD:feature/x",
+    "git push --no-verif\\y origin HEAD:feature/x",
+    'git commit --allow-empty --no-verif -m "x"',
+    "git merge --no-verify feature/x",
+  ])
+    assert.match(judge(repo, command).reason ?? "", /skip-hooks/, command);
+  assert.equal(verdictOf(repo, "git merge --no-verify-signatures --no-ff feature/x"), "allow", "another option of git merge");
+  assert.equal(verdictOf(repo, "git push --dry origin main"), "allow", "--dry is --dry-run");
+  assert.equal(verdictOf(repo, "git push --tag origin"), "allow", "--tag is --tags");
+  assert.match(judge(repo, `git commit --allow-empty --mess "key ${FAKE_AWS}"`).reason ?? "", /secret/, "--mess is --message");
+  // Skipping git's hooks switches the second check off, so it is refused with the danger guard off too.
+  const off = makeRepo({ dangerGuard: { enabled: false } });
+  assert.match(judge(off, "git push --no-verify origin HEAD:feature/x").reason ?? "", /skip-hooks/);
+  assert.equal(verdictOf(off, "rm -rf ~"), "allow", "the danger guard itself is off there");
+  // A setting handed to git through --config-env has a value the guard cannot read.
+  assert.match(judge(repo, "X=/dev/null git --config-env=core.hooksPath=X push origin HEAD:feature/x").reason, /--config-env/);
+  assert.match(judge(repo, "git --config-env alias.st=X st").reason, /--config-env/);
+  assert.equal(verdictOf(repo, "git --config-env=http.extraheader=AUTH fetch origin"), "allow");
+});
+
+test("three more ways to write a push are read", () => {
+  const repo = makeRepo();
+  commit(repo, "app.js", "export const answer = 42;\n");
+  for (const command of [
+    'cmd //c "git push origin main"',
+    'bash <<< "git push origin main"',
+    "git push origin ma\\in",
+    "git push origin HEAD:ma\\in",
+    "git push origin refs/heads/ma\\in",
+  ])
+    assert.match(judge(repo, command).reason ?? "", NOT_READY, command);
+  assert.equal(verdictOf(repo, 'cmd //c "git push origin HEAD:feature/x"'), "allow");
+  assert.equal(verdictOf(repo, 'cat <<< "git push origin main"'), "allow", "text for a program that only prints");
+});
+
+test("everyday PowerShell lines are not stopped", () => {
+  const repo = makeRepo();
+  fs.writeFileSync(path.join(repo, "b.txt"), "b\n");
+  // Windows PowerShell has no &&, so these are the usual ways to chain two commands.
+  for (const command of [
+    'git add -A; if ($?) { git commit -m "add b" }',
+    'git add -A; if ($LASTEXITCODE -eq 0) { git commit -m "add b" }',
+    '$ErrorActionPreference = "Stop"; git add -A; git commit -m "chore"',
+    'git add -A | Out-Null; git commit -m "chore"',
+    "git status; if ($?) { git push origin HEAD:feature/x }",
+  ])
+    assert.equal(judgePs(repo, command).decision, "allow", command);
+  assert.equal(verdictOf(repo, '[[ -n "$(git status --porcelain)" ]] && git add -A && git commit -m "x"'), "allow");
+  assert.equal(verdictOf(repo, 'find . -name "*.tmp" && git add -A && git commit -m "x"'), "allow");
+  // The checks still run on those lines.
+  fs.writeFileSync(path.join(repo, "k.txt"), `key = "${FAKE_AWS}"\n`);
+  assert.match(judgePs(repo, 'git add -A; if ($?) { git commit -m "add" }').reason, /secret/);
+  fs.rmSync(path.join(repo, "k.txt"));
+  commit(repo, "app.js", "export const answer = 42;\n");
+  assert.match(judgePs(repo, "git status; if ($?) { git push origin main }").reason, NOT_READY);
+  // A variable that holds a program is still a program.
+  assert.equal(judgePs(repo, '$x = build-all; git commit -am "x"').decision, "deny");
+  assert.equal(verdictOf(repo, '$x; git commit -am "x"'), "deny", "in Bash a lone variable runs what it holds");
+  assert.equal(verdictOf(repo, 'find . -name "*.tmp" -delete && git commit -am "x"'), "deny");
+});
+
+test("the hooks folder, git's settings file and the records are found where git really keeps them", () => {
+  const repo = makeRepo();
+  for (const command of [
+    "rm -rf .git/hooks/",
+    "rm -f .git/hooks/*",
+    "rm -f .git/hooks/pre-*",
+    "printf '[core]\\n\\thooksPath = /tmp/none\\n' >> .git/config",
+    "sed -i 's/a/b/' .git/config",
+  ])
+    assert.equal(verdictOf(repo, command), "ask", command);
+  assert.equal(judgeEdit({ filePath: path.join(repo, ".git", "config"), cwd: repo }).decision, "ask");
+  for (const command of [
+    "cat .git/config",
+    "rm .git/hooks/pre-commit.sample",
+    "rm -rf node_modules",
+    // Reading stays free, with more than cat.
+    "find .git/guardrails -type f",
+    "find .git/hooks -type f",
+    "tree .git/guardrails",
+  ])
+    assert.equal(verdictOf(repo, command), "allow", command);
+  assert.equal(verdictOf(repo, "find .git/guardrails -type f -delete"), "deny");
+
+  // core.hooksPath can point anywhere. The hook git really runs is the one that counts.
+  const husky = makeRepo();
+  fs.mkdirSync(path.join(husky, ".husky"));
+  fs.writeFileSync(path.join(husky, ".husky", "pre-push"), "#!/bin/sh\nexit 0\n");
+  sh(husky, "config", "core.hooksPath", ".husky");
+  for (const command of ["rm .husky/pre-push", "echo x > .husky/pre-push", "rm -rf .husky", "mv .husky/pre-push /tmp/x"])
+    assert.equal(verdictOf(husky, command), "ask", command);
+  assert.equal(judgeEdit({ filePath: path.join(husky, ".husky", "pre-push"), cwd: husky }).decision, "ask");
+  assert.equal(judgeEdit({ filePath: path.join(husky, ".husky", "pre-commit"), cwd: husky }).decision, "allow");
+
+  // A git folder can have another name: a separate git folder, or a bare repository with worktrees.
+  const base = path.dirname(repo);
+  const work = path.join(base, "work");
+  const gitdir = path.join(base, "elsewhere");
+  sh(base, "init", "-q", "-b", "main", "--separate-git-dir", gitdir, work);
+  assert.equal(judgeEdit({ filePath: path.join(gitdir, "guardrails", "approval", "x.json"), cwd: work }).decision, "deny");
+  assert.equal(judgeEdit({ filePath: path.join(gitdir, "hooks", "pre-push"), cwd: work }).decision, "ask");
+  assert.equal(judgeEdit({ filePath: path.join(work, "src", "guardrails", "x.js"), cwd: work }).decision, "allow");
+  const bare = path.join(base, "project", ".bare");
+  sh(base, "init", "-q", "--bare", "-b", "main", bare);
+  assert.equal(judgeEdit({ filePath: path.join(bare, "guardrails", "approval", "x.json"), cwd: base }).decision, "deny");
+});
+
+test("git am: the patch is read like a commit", () => {
+  const repo = makeRepo();
+  const donor = makeRepo();
+  const patches = path.join(path.dirname(donor), "patches");
+  fs.mkdirSync(patches);
+  commit(donor, "leak.txt", `key = "${FAKE_AWS}"\n`, "add leak");
+  const leak = unix(path.join(patches, "0001-leak.patch"));
+  fs.writeFileSync(leak, sh(donor, "format-patch", "-1", "--stdout"));
+  commit(donor, "fine.txt", "fine\n", `the key is ${FAKE_AWS}`);
+  const spoken = unix(path.join(path.dirname(donor), "spoken.patch"));
+  fs.writeFileSync(spoken, sh(donor, "format-patch", "-1", "--stdout"));
+  commit(donor, "fine.txt", "fine again\n", "fine");
+  const clean = unix(path.join(path.dirname(donor), "clean.patch"));
+  fs.writeFileSync(clean, sh(donor, "format-patch", "-1", "--stdout"));
+
+  assert.match(judge(repo, `git am ${leak}`).reason, /secret/);
+  assert.match(judge(repo, `git am --3way ${unix(patches)}/*.patch`).reason, /secret/);
+  assert.match(judge(repo, `git am < ${leak}`).reason, /secret/);
+  assert.match(judge(repo, `git am ${spoken}`).reason, /commit message/, "the message of the commit it makes is read too");
+  assert.equal(verdictOf(repo, `git am ${clean}`), "allow");
+  assert.equal(verdictOf(repo, "git am --abort"), "allow");
+  // A patch the guard cannot read is not let through.
+  assert.match(judge(repo, `cat ${clean} | git am`).reason, /cannot read the patch/);
+  assert.match(judge(repo, `curl -so x.patch https://example.com/x.patch && git am x.patch`).reason, /cannot read the patch/);
+  const off = makeRepo({ secretScan: { enabled: false } });
+  assert.equal(verdictOf(off, `git am ${leak}`), "allow", "the scan is switched off there");
+});
+
+test("the secret scan gives the same answer whatever the person's own diff settings are", () => {
+  for (const setting of ["diff.mnemonicPrefix", "diff.noprefix", "diff.relative"]) {
+    const repo = makeRepo({ secretScan: { allowPaths: ["fixtures/**"] } });
+    sh(repo, "config", setting, "true");
+    fs.mkdirSync(path.join(repo, "fixtures"));
+    fs.mkdirSync(path.join(repo, "sub"));
+    fs.writeFileSync(path.join(repo, "fixtures", "keys.txt"), `key = "${FAKE_AWS}"\n`);
+    sh(repo, "add", ".");
+    assert.equal(verdictOf(repo, 'git commit -m "fixtures"'), "allow", `${setting}: a path under allowPaths`);
+    sh(repo, "commit", "-q", "-m", "fixtures");
+    // Windows PowerShell writes UTF-16 with `>`. git calls such a file binary.
+    fs.writeFileSync(path.join(repo, "wide.txt"), Buffer.from(`﻿key = "${FAKE_AWS}"\r\n`, "utf16le"));
+    sh(repo, "add", ".");
+    assert.match(judge(repo, 'git commit -m "wide"').reason ?? "", /secret/, `${setting}: a UTF-16 file`);
+    sh(repo, "reset", "-q");
+    fs.rmSync(path.join(repo, "wide.txt"));
+    fs.writeFileSync(path.join(repo, "root.txt"), `key = "${FAKE_AWS}"\n`);
+    sh(repo, "add", ".");
+    assert.match(judge(repo, 'cd sub && git commit -m "sub"').reason ?? "", /secret/, `${setting}: a commit from a subfolder`);
+  }
+});
+
+test("the second check is for the agent: a person gets a note, and the push goes", () => {
+  const repo = makeRepo({ productionBranches: [] });
+  const push = (env, ...args) => spawnSync("git", ["push", ...args], { cwd: repo, encoding: "utf8", env });
+  const remoteMain = () => sh(repo, "ls-remote", "origin", "refs/heads/main").split(/\s+/)[0];
+  assert.equal(cli(repo, "install-hook").status, 0);
+  const hook = path.join(repo, ".git", "hooks", "pre-push");
+  const before = remoteMain();
+  const head = commit(repo, "app.js", "export const answer = 42;\n");
+  assert.notEqual(push(AS_AGENT, "origin", "main").status, 0);
+  assert.equal(remoteMain(), before);
+  // No terminal here either: this is the push button of an editor. It is a person's push.
+  const mine = push(AS_PERSON, "origin", "main");
+  assert.equal(mine.status, 0, mine.stderr);
+  assert.match(mine.stderr, /guardrails: note: .*is not ready for "main"\. This check is for the agent, so it is your call\./);
+  assert.equal(remoteMain(), head);
+  // Any of the markers makes it the agent's shell.
+  commit(repo, "app.js", "export const answer = 43;\n");
+  assert.notEqual(push({ ...AS_PERSON, AI_AGENT: "x" }, "origin", "main").status, 0);
+  // A broken install refuses the agent and does not lock a person out.
+  fs.writeFileSync(hook, hookText("/no/such/folder/cli.mjs"));
+  assert.notEqual(push(AS_AGENT, "origin", "HEAD:feature/x").status, 0);
+  const still = push(AS_PERSON, "origin", "HEAD:feature/x");
+  assert.equal(still.status, 0, still.stderr);
+  assert.match(still.stderr, /the guard has moved/);
+
+  // `guardrails check` only shows an answer. The real hook is what writes a stale hook again.
+  assert.equal(hookState(repo), "stale");
+  cli(repo, "check", "git push origin main");
+  assert.equal(hookState(repo), "stale", "check wrote nothing");
+  // Lines a person added to the hook are theirs: the hook is not written again over them.
+  fs.appendFileSync(hook, "# my own line\n");
+  assert.equal(hookState(repo), "edited");
+  judgeCommand({ command: "git push origin main", cwd: repo, live: true });
+  assert.match(fs.readFileSync(hook, "utf8"), /# my own line/);
+  const again = cli(repo, "install-hook");
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /changed by hand/);
+  assert.match(cli(repo, "status").stdout, /pre-push hook +installed, and changed by hand/);
+
+  // When the remote is ahead, the message says so.
+  const far = makeRepo({ productionBranches: [] });
+  assert.equal(cli(far, "install-hook").status, 0);
+  const twin = path.join(path.dirname(far), "twin");
+  execFileSync("git", ["clone", "-q", path.join(path.dirname(far), "remote.git"), twin]);
+  sh(twin, "config", "user.email", "test@example.com");
+  sh(twin, "config", "user.name", "Test");
+  commit(twin, "other.txt", "x\n");
+  sh(twin, "push", "-q", "origin", "main");
+  const mineToo = commit(far, "app.js", "export const answer = 42;\n");
+  assert.equal(cli(far, "test").status, 0);
+  assert.equal(cli(far, "review-stamp", "--report", passingReport(far, mineToo)).status, 0);
+  const ahead = spawnSync("git", ["push", "origin", "main"], { cwd: far, encoding: "utf8", env: AS_AGENT });
+  assert.notEqual(ahead.status, 0);
+  assert.match(ahead.stderr, /commits that are not in this clone/);
+  assert.doesNotMatch(ahead.stderr, /rewrite or delete/);
+});
+
+test("inside another tool's hook the check keeps the list of branches for the commands below it", (t) => {
+  const repo = makeRepo({ productionBranches: [] });
+  const push = (env, ...args) => spawnSync("git", ["push", ...args], { cwd: repo, encoding: "utf8", env });
+  const hook = path.join(repo, ".git", "hooks", "pre-push");
+  fs.writeFileSync(hook, "#!/bin/sh\ncat > seen.txt\n", { mode: 0o755 });
+  const told = cli(repo, "install-hook");
+  assert.equal(told.status, 1);
+  for (const line of hookLines()) assert.ok(told.stderr.includes(`\n${line}\n`), `the message holds the line, with no indent: ${line}`);
+  // The lines hold no path of this machine. In a clone where the guard was never installed they do nothing.
+  for (const line of hookLines()) assert.ok(!line.includes(unix(ROOT)), line);
+  const pointer = path.join(repo, ".git", "guardrails", POINTER_NAME);
+  assert.equal(unix(fs.readFileSync(pointer, "utf8").trim()), unix(CLI), "install-hook noted where the guard is");
+  // git hands the list to a hook once. The lines keep it, and hand it on.
+  fs.writeFileSync(hook, ["#!/bin/sh", ...hookLines(), "cat > seen.txt", ""].join("\n"), { mode: 0o755 });
+  assert.equal(hookState(repo), "added");
+  assert.match(cli(repo, "status").stdout, /pre-push hook +installed inside another tool's hook/);
+  const present = cli(repo, "install-hook");
+  assert.equal(present.status, 0, present.stderr);
+  assert.match(present.stdout, /already runs the push check/);
+  commit(repo, "app.js", "export const answer = 42;\n");
+  const stopped = push(AS_AGENT, "origin", "main");
+  assert.notEqual(stopped.status, 0);
+  assert.match(stopped.stderr, NOT_READY);
+  const sent = push(AS_AGENT, "origin", "HEAD:feature/x");
+  assert.equal(sent.status, 0, sent.stderr);
+  assert.match(fs.readFileSync(path.join(repo, "seen.txt"), "utf8"), /refs\/heads\/feature\/x/, "the command below got the list");
+  // After a plugin update the clone points to a copy that is gone: the agent is told what to do.
+  fs.writeFileSync(pointer, "/gone/cli.mjs\n");
+  assert.equal(hookState(repo), "moved");
+  assert.match(cli(repo, "status").stdout, /does not point to this copy of the plugin/);
+  const gone = push(AS_AGENT, "origin", "HEAD:feature/y");
+  assert.notEqual(gone.status, 0);
+  assert.match(gone.stderr, /Run: guardrails install-hook/);
+  assert.equal(push(AS_PERSON, "origin", "HEAD:feature/y").status, 0);
+  // One command puts it right, and the hook file is not touched. The guard also does it by itself.
+  const text = fs.readFileSync(hook, "utf8");
+  const linked = cli(repo, "install-hook");
+  assert.equal(linked.status, 0, linked.stderr);
+  assert.match(linked.stdout, /now points them to this copy of the plugin/);
+  assert.equal(hookState(repo), "added");
+  fs.writeFileSync(pointer, "/gone/cli.mjs\n");
+  judgeCommand({ command: "git push origin main", cwd: repo, live: true });
+  assert.equal(hookState(repo), "added", "the guard noted its new place by itself");
+  assert.equal(fs.readFileSync(hook, "utf8"), text);
+  // A clone where the guard was never installed: the lines do nothing, also for an agent.
+  fs.rmSync(pointer);
+  const bare = push(AS_AGENT, "origin", "HEAD:feature/z");
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.match(fs.readFileSync(path.join(repo, "seen.txt"), "utf8"), /refs\/heads\/feature\/z/);
+  // The single line that version 0.2.0 advised took the list away. It is reported, with the new lines.
+  fs.writeFileSync(hook, `#!/bin/sh\nnode "${unix(CLI)}" gate "$@" || exit 1\ncat > seen.txt\n`, { mode: 0o755 });
+  assert.equal(hookState(repo), "oldline");
+  assert.match(cli(repo, "status").stdout, /the one line of version 0\.2\.0/);
+  const old = cli(repo, "install-hook");
+  assert.equal(old.status, 1);
+  assert.match(old.stderr, /Replace that line with these/);
+
+  // A hooks folder outside the repository's own git folder is never written to.
+  const shared = makeRepo();
+  const folder = path.join(path.dirname(shared), "shared-hooks");
+  fs.mkdirSync(folder);
+  sh(shared, "config", "core.hooksPath", unix(folder));
+  const kept = cli(shared, "install-hook");
+  assert.equal(kept.status, 1);
+  assert.match(kept.stderr, /core\.hooksPath/);
+  assert.deepEqual(fs.readdirSync(folder), []);
+  const tracked = makeRepo();
+  sh(tracked, "config", "core.hooksPath", ".githooks");
+  assert.equal(cli(tracked, "install-hook").status, 1);
+  assert.equal(fs.existsSync(path.join(tracked, ".githooks")), false);
+
+  // With git-lfs, for real: the large file still reaches the remote.
+  if (spawnSync("git", ["lfs", "version"], { encoding: "utf8" }).status !== 0) return t.diagnostic("git-lfs is not installed: that part was skipped");
+  const big = makeRepo({ productionBranches: [] });
+  sh(big, "lfs", "install", "--local");
+  const lfsHook = path.join(big, ".git", "hooks", "pre-push");
+  assert.equal(cli(big, "install-hook").status, 1, "git-lfs has its hook there: the lines are printed");
+  const theirs = fs.readFileSync(lfsHook, "utf8").split("\n");
+  fs.writeFileSync(lfsHook, [theirs[0], ...hookLines(), ...theirs.slice(1)].join("\n"), { mode: 0o755 });
+  sh(big, "lfs", "track", "*.bin");
+  fs.writeFileSync(path.join(big, "big.bin"), "0123456789".repeat(50));
+  sh(big, "add", ".");
+  sh(big, "commit", "-q", "-m", "a large file");
+  const head = sh(big, "rev-parse", "HEAD");
+  const send = () => spawnSync("git", ["push", "origin", "main"], { cwd: big, encoding: "utf8", env: AS_AGENT });
+  const held = send();
+  assert.notEqual(held.status, 0);
+  assert.match(held.stderr, NOT_READY);
+  assert.equal(cli(big, "test").status, 0);
+  assert.equal(cli(big, "review-stamp", "--report", passingReport(big, head)).status, 0);
+  const went = send();
+  assert.equal(went.status, 0, went.stderr);
+  const store = path.join(path.dirname(big), "remote.git", "lfs", "objects");
+  const stored = fs.readdirSync(store, { recursive: true }).filter((entry) => fs.statSync(path.join(store, entry)).isFile());
+  assert.equal(stored.length, 1, "the large file is on the remote");
+});
+
+test("status names a setting the guard does not know", () => {
+  const repo = makeRepo({ protectedBranch: ["main"] });
+  assert.match(cli(repo, "status").stdout, /config NOTE +not a setting of the guard, so it changes nothing: protectedBranch/);
+  assert.doesNotMatch(cli(makeRepo(), "status").stdout, /config NOTE/);
 });

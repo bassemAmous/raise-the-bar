@@ -68,14 +68,33 @@ that step alone:
    the aliases and the git settings have done their work. The same checks run again there: tests
    on record, review on record, the approval for production, forward-only history.
 
-The second check is for the agent, not for you. In an agent's shell there is no terminal, so a
-push that is not ready is refused. At your own terminal it prints a one-line note and lets the
-push go: it is your call.
+The second check is for the agent, not for you. The agent's shell carries a marker (the
+`CLAUDECODE`, `AI_AGENT` or `CLAUDE_CODE_ENTRYPOINT` variable), and there a push that is not
+ready is refused. Without a marker the push is yours: from your terminal, or from the push button
+of your editor. It prints a one-line note and goes: it is your call. A push you start from inside
+the agent's app can carry the marker too. Then it is checked like the agent's.
 
 The hook is one file in the repository's hooks folder. It is never committed, a fresh clone does
-not have it, and deleting the file removes it. A `pre-push` hook from another tool is never
-replaced: the command prints the one line to add to it. After a plugin update the guard writes
-its hook again by itself.
+not have it, and deleting the file removes it. After a plugin update the guard writes its hook
+again by itself, unless you changed the file by hand: then it is left alone, and
+`guardrails status` says so.
+
+`install-hook` does not write in three cases, and prints what to do instead:
+
+- **Another tool's hook is there** (husky, git-lfs, one your team wrote). It is never replaced.
+  The command prints a few lines to put at the top of that hook. git hands the list of branches
+  to a hook only once, so the lines keep it, give it to the guard, and hand it on to the commands
+  below them. They hold no path of your machine: where the guard is, is noted in a small file
+  inside the clone's own git folder, next to the records. So the lines can be committed with a
+  shared hook, and a plugin update changes only that small file, which the guard does by itself.
+  In a clone where the guard was never installed the lines do nothing. The single line that
+  version 0.2.0 printed did not hand the list on: with git-lfs the large files were then not
+  uploaded. `guardrails status` reports that line, and `guardrails install-hook` prints the new
+  ones.
+- **The hooks folder is shared** (`core.hooksPath` points outside the repository's own git
+  folder: one folder for every repository of the machine, or a folder committed with the
+  project). The guard does not write there by itself. It prints the lines for you to add.
+- **You changed the guard's hook by hand.** Delete the file first if you want a fresh one.
 
 ## How the records work
 
@@ -111,18 +130,23 @@ Two ways, both need a person:
    approve production 75e9538d yet"), or a paste of the guard's own message, approves nothing.
    The hook reads the session log and counts only messages a person typed: not the agent's own
    text, not tool output, not messages from other agents, not a summary of an older
-   conversation. The approval is for that one commit and expires after `maxAgeMinutes` (60 by
-   default).
+   conversation. The approval is for that exact code and expires after `maxAgeMinutes` (60 by
+   default). "That exact code" means the files of the commit: a commit with the same files and
+   another message is covered, a commit with one changed file is not.
 2. **In your own terminal.** Run `guardrails approve`. It needs a real terminal and asks you to
-   type the commit id. An agent's shell is not a terminal, so the command refuses there.
+   type the commit id. An agent's shell is not a terminal, so the command refuses there. (A Git
+   Bash window on Windows is not seen as one either: use PowerShell or Windows Terminal.)
 
 A typed approval that lets a push through is also kept as a record, with the same end time, so
 that git's own hook can read it.
 
 The agent is also refused when it tries to run `guardrails approve`, to write under
 `.git/guardrails/` or to the session log, and it must ask you before changing
-`guardrails.config.json`, git's hooks folder or `core.hooksPath`. Reading any of them is always
-allowed.
+`guardrails.config.json`, git's hooks folder, `core.hooksPath` or a file git reads its settings
+from (`.git/config`). The guard asks git where these really are, so a git folder with another
+name and a hooks folder such as `.husky` are covered. Reading any of them with the usual tools
+(`cat`, `ls`, `grep`, `find`, `head`, `Get-Content` and the like) is allowed. A tool that can
+also write, such as `sed` or `awk`, is treated as a writer.
 
 Commands listed under `productionCommands` (a deploy script, for example) use the same line. In
 a repository the approval names the current commit and opens those commands until it expires.
@@ -133,13 +157,13 @@ counts for 10 minutes.
 
 | Command | What it does |
 | --- | --- |
-| `guardrails status` | What the current commit has on record, whether the pre-push hook is installed, and any problem in the config file |
+| `guardrails status` | What the current commit has on record, the state of the pre-push hook, any problem in the config file, and any setting in it the guard does not know |
 | `guardrails test` | Runs the tests and records a pass for this exact code |
 | `guardrails review-stamp --report <file>` | Records a passed review |
 | `guardrails approve` | Human only, real terminal: approve this commit for production |
-| `guardrails check "<command>"` | Shows what the guard would say, without running anything |
+| `guardrails check "<command>"` | Shows what the guard would say. It runs nothing and writes nothing |
 | `guardrails init` | Writes `guardrails.config.json` with the defaults |
-| `guardrails install-hook` | Adds git's own `pre-push` hook, the second check on every push |
+| `guardrails install-hook` | Adds git's own `pre-push` hook, the second check on every push, or prints the lines to add to a hook that is already there |
 
 The `guardrails` command is on the agent's path while the plugin is enabled. In your own terminal
 use `node <plugin folder>/cli.mjs`.
@@ -199,17 +223,19 @@ is fixed, and `guardrails status` shows the problem.
   a line written so that its words hide the push, is not seen there. The second check is for
   that: run `guardrails install-hook`. A merge made on the server (`gh pr merge`, a merge button)
   passes through neither check. Branch protection on the server is the lock for those.
-- **The second check is a local file.** The agent is asked before it changes git's hooks folder
-  or `core.hooksPath`, and `--no-verify` is refused. A fresh clone, or a machine where nobody ran
-  `guardrails install-hook`, does not have it. `guardrails status` shows whether it is installed.
-  It tells a person from an agent by the terminal and by the `CLAUDECODE` variable of the agent's
-  shell. A program that fakes both passes as a person.
+- **The second check is a local file.** The agent is asked before it changes git's hooks folder,
+  `core.hooksPath` or `.git/config`, and `--no-verify` is refused, also cut short (`--no-verif`)
+  and also with the destructive-command guard switched off. A fresh clone, or a machine where
+  nobody ran `guardrails install-hook`, does not have it. `guardrails status` shows whether it is
+  installed. It tells an agent from a person by the marker in the agent's shell. A program that
+  removes the marker passes as a person, and an agent tool that sets none of the three is not
+  seen as an agent.
 - **The test record is strong, the review record is weaker.** A test pass is written by the tool
   that ran the tests. A review pass is written from a report the agent hands in: the guard checks
   that the report names the commit and ends with a pass, and keeps it for you to read. It cannot
   check that the review was good.
 - **One approval is a window, not a single use.** Until it expires, it covers every push of that
-  commit and every command in `productionCommands`. Set `maxAgeMinutes` low if that is too wide.
+  code and every command in `productionCommands`. Set `maxAgeMinutes` low if that is too wide.
 - A push whose target is a shell variable cannot be read, so it is refused. Write the branch
   name. The same goes for a program named through a variable on a line that talks about git, and
   for an alias or a push setting made on the same line as the push: send them in two parts.
@@ -221,6 +247,11 @@ is fixed, and `guardrails status` shows the problem.
 - The end of a merge, a rebase or a cherry-pick (`--continue`) is scanned for what is staged at
   that moment, and so is the text of a commit message. The commits git replays by itself in the
   middle of a rebase are not read again.
+- `git am` is scanned by reading the patch files named on the line. A patch that comes through a
+  pipe, or that an earlier step of the same line can write, is refused: name the file and send
+  `git am` as its own command. A binary file inside a patch is not read.
+- A push to a protected branch whose commits on the remote are not in your clone cannot be
+  compared, so it is refused with "fetch first". Plain git refuses that push too.
 - When the guard itself fails (a crash, or a git that does not answer in time), a line that can
   commit, push or deploy is refused, and one line on stderr says which check failed. Any other
   line goes through, so a bug in the guard never blocks `ls`.
@@ -239,11 +270,13 @@ is fixed, and `guardrails status` shows the problem.
 node --test plugins/guardrails/tests/guardrails.test.mjs
 ```
 
-40 tests. Each one builds a real temporary git repository with a real remote and runs the guard
+49 tests. Each one builds a real temporary git repository with a real remote and runs the guard
 against it: the full path to production, the refusals, the forged approvals, the secret scan,
 the command shapes that must and must not be read as a push, and real pushes through git's own
-hook. They run on Linux, macOS and Windows, on Node 20, 22 and 24.
+hook, as the agent and as a person. Where git-lfs is installed, one of them sends a large file
+through a hook that holds both git-lfs and the guard. They run on Linux, macOS and Windows, on
+Node 20, 22 and 24.
 
-The guard was reviewed twice by an independent agent that was asked to break it, and a third
-time by an outside reviewer. Every bypass they found is either closed and covered by a test, or
-listed under Limits.
+The guard was reviewed twice by an independent agent that was asked to break it, a third time by
+an outside reviewer, and a fourth time by an independent agent that checked the code against
+this README. Every gap they found is either closed and covered by a test, or listed under Limits.

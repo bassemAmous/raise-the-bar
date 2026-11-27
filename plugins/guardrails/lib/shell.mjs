@@ -397,7 +397,7 @@ function walk(items, state, calls, depth, notes) {
         }
       } else break;
     }
-    const base = { redirects: item.redirects, heredocs: item.heredocs, pipe: item.pipe, env };
+    const base = { redirects: item.redirects, heredocs: item.heredocs, pipe: item.pipe, env, ps: Boolean(state.ps) };
     if (words.length === 0) {
       if (item.redirects.length) calls.push({ program: "", word0: "", args: [], ...base, folder: state.folder });
       continue;
@@ -437,7 +437,9 @@ function walk(items, state, calls, depth, notes) {
     let innerPs = false;
     // With no script file and no -c, a shell runs what it is fed: a heredoc, or text piped into it.
     const fed = () => {
-      const texts = [...item.heredocs, ...textPipedBy(fedBy)];
+      // bash <<< "git push": a here-string is fed to the shell the same way.
+      const strings = item.redirects.filter((redirect) => redirect.op === "<<<").map((redirect) => redirect.target);
+      const texts = [...item.heredocs, ...strings, ...textPipedBy(fedBy)];
       return texts.length ? texts.join("\n") : null;
     };
     if (SHELLS.has(program)) {
@@ -458,7 +460,8 @@ function walk(items, state, calls, depth, notes) {
       else if (!args.some((arg) => /^-f(?:ile)?$/i.test(arg))) inner = args.filter((arg) => !arg.startsWith("-")).join(" ");
     } else if (program === "cmd") {
       innerPs = true; // cmd has no backslash escapes either: C:\* must stay C:\*
-      const at = args.findIndex((arg) => /^\/[ck]$/i.test(arg));
+      // Git Bash writes the switch as //c, so that it is not taken for a path.
+      const at = args.findIndex((arg) => /^\/{1,2}[ck]$/i.test(arg));
       if (at !== -1) inner = args.slice(at + 1).join(" ");
     } else if (program === "eval" || program === "invoke-expression" || program === "iex") inner = args.join(" ");
     if (inner !== null) {
@@ -505,17 +508,48 @@ export function readLine(command, cwd, options = {}) {
 /** The calls of a command line. See readLine. */
 export const callsIn = (command, cwd, options) => readLine(command, cwd, options).calls;
 
-/** A call to git, past its global options: { folder, verb, args, globals, call } or null. */
+/**
+ * The long options a word can stand for. git takes a long option cut short when the short form
+ * fits only one: `--delet` is `--delete`, `--no-verif` is `--no-verify`. A word that fits several
+ * is refused by git, so the caller may read it as the riskiest of them.
+ */
+export function longOptions(word, known) {
+  const equals = word.indexOf("=");
+  const name = equals === -1 ? word : word.slice(0, equals);
+  if (known.includes(name)) return [name];
+  return name.length > 2 ? known.filter((option) => option.startsWith(name)) : [];
+}
+
+/** `--name` and `--no-name` for each option name. */
+export const withNegations = (names) => names.flatMap((name) => [`--${name}`, `--no-${name}`]);
+
+// The name of a long option never holds a backslash, so `--no-verif\y` is read the way Bash runs it.
+function plainOption(arg) {
+  if (!arg.startsWith("--") || !arg.includes("\\")) return arg;
+  const equals = arg.indexOf("=");
+  const name = equals === -1 ? arg : arg.slice(0, equals);
+  return name.split("\\").join("") + (equals === -1 ? "" : arg.slice(equals));
+}
+
+/**
+ * A call to git, past its global options: { folder, verb, args, globals, envSettings, call } or null.
+ * `globals` holds the settings written with -c. `envSettings` holds the names of the settings
+ * whose value comes from an environment variable (--config-env).
+ */
 export function gitCall(call) {
   if (call.program !== "git") return null;
   let folder = call.folder;
   const globals = [];
+  const envSettings = [];
+  const fromEnv = (pair) => envSettings.push(pair.slice(0, Math.max(pair.lastIndexOf("="), 0)).toLowerCase());
   const args = call.args;
   let i = 0;
   for (; i < args.length; i++) {
     const arg = args[i];
     if (arg === "-C") folder = args[++i] === undefined || folder === null ? null : resolveFolder(folder, args[i]);
     else if (arg === "-c") globals.push(args[++i] ?? "");
+    else if (arg === "--config-env") fromEnv(args[++i] ?? "");
+    else if (arg.startsWith("--config-env=")) fromEnv(arg.slice("--config-env=".length));
     else if (arg === "--namespace" || arg === "--exec-path" || arg === "--super-prefix") i++;
     else if (arg === "--git-dir" || arg === "--work-tree") {
       folder = null;
@@ -526,9 +560,15 @@ export function gitCall(call) {
   if (i >= args.length) return null;
   // A verb never holds a backslash, so `pu\sh` is read the way Bash runs it. `git stage` is `git add`.
   const verb = args[i].toLowerCase().split("\\").join("");
-  return { folder, verb: verb === "stage" ? "add" : verb, args: args.slice(i + 1), globals, call };
+  return { folder, verb: verb === "stage" ? "add" : verb, args: args.slice(i + 1).map(plainOption), globals, envSettings, call };
 }
 
+const COMMIT_LONG = withNegations([
+  "all", "allow-empty", "allow-empty-message", "amend", "author", "branch", "cleanup", "date", "dry-run", "edit", "file",
+  "fixup", "gpg-sign", "include", "interactive", "long", "message", "null", "only", "patch", "pathspec-file-nul",
+  "pathspec-from-file", "porcelain", "post-rewrite", "quiet", "reedit-message", "reset-author", "reuse-message", "short",
+  "signoff", "squash", "status", "template", "trailer", "untracked-files", "verbose", "verify",
+]);
 const COMMIT_SHORT_WITH_VALUE = new Set(["m", "F", "C", "c", "t"]);
 const COMMIT_LONG_WITH_VALUE = new Set([
   "--message", "--file", "--reuse-message", "--reedit-message", "--template", "--author", "--date", "--cleanup",
@@ -556,11 +596,15 @@ export function readCommit(args) {
     }
     if (arg.startsWith("--")) {
       const equals = arg.indexOf("=");
-      const name = equals === -1 ? arg : arg.slice(0, equals);
-      if (name === "--all") commit.all = true;
-      else if (name === "--no-verify") commit.noVerify = true;
-      else if (name === "--dry-run") commit.dryRun = true;
-      else if (name === "--patch" || name === "--interactive" || name === "--pathspec-from-file") commit.wide = true;
+      // git takes a long option cut short: --mess is --message. A word that fits several options
+      // is refused by git, and is read here as the riskiest of them.
+      const fits = longOptions(arg, COMMIT_LONG);
+      const name = fits.length === 1 ? fits[0] : equals === -1 ? arg : arg.slice(0, equals);
+      if (name === "--all" || fits.includes("--all")) commit.all = true;
+      if (name === "--no-verify" || fits.includes("--no-verify")) commit.noVerify = true;
+      if (name === "--dry-run") commit.dryRun = true;
+      if ([name, ...fits].some((option) => option === "--patch" || option === "--interactive" || option === "--pathspec-from-file"))
+        commit.wide = true;
       if (COMMIT_LONG_WITH_VALUE.has(name)) keep(name, equals === -1 ? args[++i] : arg.slice(equals + 1));
       continue;
     }

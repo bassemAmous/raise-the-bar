@@ -3,6 +3,51 @@
 A plugin's `version` changes whenever its files change. People who already installed a plugin get
 the new copy only then.
 
+## 0.2.1
+
+`guardrails` only. `craft` and `council` stay at 0.2.0. After an independent review that checked
+the 0.2.0 code against its README. Every change below is covered by a test or is a change of text.
+
+### guardrails
+
+- **The lines for another tool's hook keep the list of branches.** The single line 0.2.0 printed
+  for a `pre-push` hook that already exists took git's list of branches away from the commands
+  under it. With git-lfs the large files were then not uploaded. `install-hook` now prints a few
+  lines that keep the list and hand it on. They hold no path of your machine, so they can be
+  committed with a shared hook, and a plugin update does not break them. If you added the old
+  line: run `guardrails install-hook` and replace it with the lines it prints. `guardrails
+  status` reports the old line.
+- **A person is told from the agent by a marker, not by the terminal.** The agent's shell carries
+  `CLAUDECODE`, `AI_AGENT` or `CLAUDE_CODE_ENTRYPOINT`. A push without one is a person's, also
+  from the push button of an editor, which 0.2.0 refused.
+- **Long options cut short.** git takes `--delet` for `--delete` and `--no-verif` for
+  `--no-verify`. The guard now reads them the same way, for `git push` and `git commit`.
+  `--no-verify` is refused with the destructive-command guard switched off too, and a route,
+  alias or hooks setting handed to git with `--config-env` is refused.
+- **The secret scan no longer depends on your own git settings.** With `diff.mnemonicPrefix`,
+  `diff.noprefix` or `diff.relative` set, 0.2.0 could refuse a path listed in `allowPaths` and
+  miss a key in a UTF-16 file or outside the current folder.
+- **`git am` is scanned.** The patch files named on the line are read like a commit, with the
+  commit messages they carry.
+- **Protected places are found where git really keeps them.** A git folder with another name
+  (`--separate-git-dir`, a bare repository with worktrees), a hooks folder named by
+  `core.hooksPath` (`.husky`), and `.git/config` now get the same refusal or question, from a
+  command and from the file-editing tools. Removing the whole hooks folder is asked about too.
+- **Everyday PowerShell lines pass.** `git add -A; if ($?) { git commit -m "x" }`,
+  `$ErrorActionPreference = "Stop"` and a pipe into `Out-Null` are no longer taken for a step
+  that writes files. The same for `[[ ... ]]` and a plain `find` in Bash.
+- **Three more ways to write a push are read:** `cmd //c "git push ..."`, `bash <<< "git push
+  ..."` and a backslash inside the branch name.
+- `install-hook` does not write into a hooks folder shared by several repositories or committed
+  with the project, and never over a hook you changed by hand. `guardrails check` writes nothing.
+- When the remote branch holds commits your clone does not have, the second check says "fetch
+  first" in place of "would rewrite or delete".
+- `guardrails status` shows more states of the hook, and names a setting in the config file that
+  the guard does not know.
+- The README now says: the approval is for the exact code (not the commit id), reading the
+  protected places is allowed with the usual reading tools (not "always"), and how the agent is
+  told from a person.
+
 ## 0.2.0
 
 After an outside review of 0.1.0. Every change below is covered by a test or is a change of text.

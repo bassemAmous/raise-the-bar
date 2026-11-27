@@ -2,7 +2,7 @@
 // careful generic rules: a scanner that cries wolf gets switched off.
 import fs from "node:fs";
 import path from "node:path";
-import { commitOf, gitBytes, matchesAny, repoRoot, tryGit } from "./core.mjs";
+import { PLAIN_DIFF, commitOf, gitBytes, matchesAny, repoRoot, tryGit } from "./core.mjs";
 
 export const ALLOW_PRAGMA = "guardrails:allow-secret";
 
@@ -256,7 +256,8 @@ const FORCED_ADD = /^(?:--force|-[a-zA-Z]*f[a-zA-Z]*)$/;
 // A path the shell rewrites before git sees it: a variable, a command, or a brace list ({a,b}.js).
 const UNREADABLE_PATH = /[$`{}]/;
 const rows = (text) => (text ?? "").split("\n").filter(Boolean);
-const QUIET = ["-c", "core.quotePath=false"];
+// File names as they are, and a diff in one fixed form whatever the person's own diff settings say.
+const QUIET = PLAIN_DIFF;
 
 /** The files not yet known to git that these `git add` calls would add, as paths from the root. */
 function newFilesFor(adds, root) {
@@ -305,7 +306,7 @@ export function scanCommit(folder, { scope = null, adds = [], allowPaths = [] } 
   const read = (against, where, paths) => {
     const diff = [...QUIET, "diff", "--no-color", "--no-ext-diff", "--no-renames", ...against];
     const only = paths.length ? ["--", ...paths] : [];
-    const text = tryGit([...diff, "-U0", "--no-textconv", ...only], where);
+    const text = tryGit([...diff, "-U0", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", ...only], where);
     const changed = tryGit([...diff, "--name-only", "--diff-filter=AM", ...only], where);
     if (text === null || changed === null) return false;
     for (const name of rows(changed)) names.add(name);
@@ -373,4 +374,35 @@ export function scanCommit(folder, { scope = null, adds = [], allowPaths = [] } 
     waived: once(report.waived),
     files: secretFiles([...names], { allowPaths }),
   };
+}
+
+/**
+ * What patch files hand to `git am`: the lines they add, and the messages of the commits they make.
+ * Returns { findings, waived, files } or { error } when a file cannot be read.
+ */
+export function scanPatches(files, { allowPaths = [] } = {}) {
+  const report = newReport();
+  const names = [];
+  for (const file of files) {
+    let text = null;
+    try {
+      if (fs.statSync(file).size <= MAX_FILE_BYTES) text = textIn(fs.readFileSync(file));
+    } catch {
+      text = null;
+    }
+    if (text === null) return { error: `the patch file ${file} is missing, too large, or not text` };
+    const plain = text.replace(/\r\n/g, "\n");
+    readDiff(plain, allowPaths, report);
+    // Everything outside the diffs is mail: the subject and the message of each commit.
+    const said = [];
+    let inDiff = false;
+    for (const row of plain.split("\n")) {
+      if (row.startsWith("diff --git ")) inDiff = true;
+      else if (/^From [0-9a-f]{40,64} /.test(row)) inDiff = false;
+      if (!inDiff) said.push(row);
+      else if (row.startsWith("+++ b/")) names.push(row.slice(6).trim());
+    }
+    readText(said.join("\n"), COMMIT_MESSAGE, [], report);
+  }
+  return { findings: report.findings, waived: report.waived, files: secretFiles(names, { allowPaths }) };
 }

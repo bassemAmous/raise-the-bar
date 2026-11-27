@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { CONFIG_FILE, DEFAULTS, commitOf, loadConfig, readStdin, repoRoot, stateDir, tryGit } from "./lib/core.mjs";
+import { CONFIG_FILE, DEFAULTS, PLAIN_DIFF, commitOf, isAgentShell, loadConfig, readStdin, repoRoot, stateDir, tryGit } from "./lib/core.mjs";
 import { isGuarded, notReady, pushGate } from "./lib/gate.mjs";
 import { CLI_FILE, hookState, installHook } from "./lib/githook.mjs";
 import { judgeCommand } from "./lib/judge.mjs";
@@ -65,6 +65,7 @@ function status() {
       `commit            ${head.slice(0, 8)}`,
       `config            ${config.file ?? "defaults (no guardrails.config.json)"}`,
       ...(config.error ? [`config PROBLEM    ${config.error}`] : []),
+      ...(config.unknown.length ? [`config NOTE       not a setting of the guard, so it changes nothing: ${config.unknown.join(", ")}`] : []),
       `protected         ${config.protectedBranches.join(", ")}`,
       `production        ${config.productionBranches.join(", ") || "(none)"}`,
       `test command      ${testCommand ?? (config.tests.required ? NO_TEST_COMMAND : "(none: tests are switched off in the config)")}`,
@@ -81,7 +82,11 @@ const NO_TEST_COMMAND = "(none found: a push of code to a protected branch is re
 const HOOK_STATES = {
   current: "installed (git checks every push a second time)",
   stale: "written by another copy of the plugin: run guardrails install-hook",
-  other: "another tool's hook is there: run guardrails install-hook to see the line to add",
+  edited: "installed, and changed by hand: it is not written again after a plugin update",
+  added: "installed inside another tool's hook (git checks every push a second time)",
+  moved: "inside another tool's hook, and this clone does not point to this copy of the plugin: run guardrails install-hook",
+  oldline: "another tool's hook holds the one line of version 0.2.0, which takes the list of branches away from the commands under it: run guardrails install-hook for the lines to replace it with",
+  other: "another tool's hook is there: run guardrails install-hook to see the lines to add",
   none: "not installed: run guardrails install-hook",
 };
 
@@ -150,7 +155,8 @@ async function approve() {
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     fail(
       "approve needs a real terminal with a person at it. An agent's shell has none.\n" +
-        "In a chat, type the approval line instead (see the guard's message).",
+        "In a chat, type the approval line instead (see the guard's message)." +
+        (process.platform === "win32" ? "\nIn a Git Bash window, run it from PowerShell or Windows Terminal instead." : ""),
     );
   const config = loadConfig(cwd);
   const head = headOf();
@@ -179,6 +185,7 @@ function check() {
   if (at !== -1) words.splice(at, 2);
   const text = words.join(" ");
   if (!text) fail('usage: guardrails check "<shell command>"');
+  // Shown only: `live` stays off, so nothing is written.
   const verdict = judgeCommand({ command: text, cwd, transcriptPath });
   process.stdout.write(`${verdict.decision.toUpperCase()}\n${verdict.reason ? `${verdict.reason}\n` : ""}`);
   process.exit(verdict.decision === "allow" ? 0 : 2);
@@ -202,11 +209,15 @@ function init() {
 function installPushHook() {
   needRepo();
   try {
-    const file = installHook(cwd);
+    const { file, state } = installHook(cwd);
     process.stdout.write(
-      `guardrails: wrote ${file}\n` +
-        "git now runs the push checks itself, with the commit and the branch it really sends.\n" +
-        "To remove it, delete that file.\n",
+      state === "present"
+        ? `guardrails: ${file} already runs the push check. Nothing to do.\n`
+        : state === "linked"
+          ? `guardrails: ${file} holds the lines of the push check. This clone now points them to this copy of the plugin.\n`
+          : `guardrails: wrote ${file}\n` +
+            "git now runs the push checks itself, with the commit and the branch it really sends.\n" +
+            "To remove it, delete that file.\n",
     );
   } catch (error) {
     fail(error.message);
@@ -216,20 +227,19 @@ function installPushHook() {
 const ZERO = /^0+$/;
 
 /**
- * Called by git's pre-push hook: `gate --terminal <0|1> <remote> <url>`, with one line per
- * branch on the standard input: <local ref> <local commit> <remote ref> <remote commit>.
+ * Called by git's pre-push hook: `gate <remote> <url>`, with one line per branch on the standard
+ * input: <local ref> <local commit> <remote ref> <remote commit>.
  * Exit 0 lets the push go. Exit 1 stops it.
  */
 async function gate() {
-  const at = rest.indexOf("--terminal");
-  // A person at their own terminal decides for themselves. An agent's shell has no terminal.
-  // The hook says which it is. A hook of another tool that calls `gate` with no flag leaves it to node.
-  const atTerminal = at === -1 ? Boolean(process.stderr.isTTY) : rest[at + 1] === "1";
-  const person = atTerminal && !process.env.CLAUDECODE;
+  // The check is for the agent, and the agent's shell carries a marker. A person decides for
+  // themselves, at a terminal or with the push button of an editor: they get a note, and the push goes.
+  // (`--terminal <0|1>`, sent by the hook of version 0.2.0, is not used any more.)
+  const person = !isAgentShell();
   const stop = (lines) => {
     if (person) {
       const what = lines[0].replace(/^BLOCKED by guardrails: /, "");
-      process.stderr.write(`guardrails: note: ${what} You are at a terminal, so it is your call.\n`);
+      process.stderr.write(`guardrails: note: ${what} This check is for the agent, so it is your call.\n`);
       return;
     }
     process.stderr.write(`${lines.join("\n")}\n`);
@@ -256,6 +266,14 @@ async function gateRows(root, stop) {
     if (!remoteRef.startsWith("refs/heads/")) continue;
     const dst = remoteRef.slice("refs/heads/".length);
     if (!isGuarded(dst, config)) continue;
+    if (!ZERO.test(base) && !ZERO.test(head) && spawnSync("git", ["cat-file", "-e", `${base}^{commit}`], { cwd }).status !== 0) {
+      // Without the commit the remote is on, nothing can be compared. Plain git refuses such a push too.
+      stop([
+        `BLOCKED by guardrails: the branch "${dst}" on the remote has commits that are not in this clone, so this push cannot be checked.`,
+        "Fetch and bring them in first. Then send the push again.",
+      ]);
+      continue;
+    }
     const forward = ZERO.test(base) || spawnSync("git", ["merge-base", "--is-ancestor", base, head], { cwd }).status === 0;
     if (ZERO.test(head) || !forward) {
       stop([
@@ -267,7 +285,7 @@ async function gateRows(root, stop) {
     if (head === base) continue;
     const names = ZERO.test(base)
       ? null
-      : tryGit(["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", base, head], cwd);
+      : tryGit([...PLAIN_DIFF, "diff", "--name-only", "--no-renames", base, head], cwd);
     const changed = names === null ? null : names.split("\n").filter(Boolean);
     const state = pushGate({ folder: cwd, head, dst, changed, config });
     if (state.open) stop(notReady({ gate: state, head, dst, folder: root, config, cli: `node "${CLI_FILE}"` }));

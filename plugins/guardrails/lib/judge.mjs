@@ -8,11 +8,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalFor } from "./approval.mjs";
 import { CONFIG_FILE, commitOf, loadConfig, repoRoot, slash, stateDir, tryGit } from "./core.mjs";
-import { dangerIn } from "./danger.mjs";
+import { SKIPS_HOOKS, dangerIn, skipsHooks } from "./danger.mjs";
 import { isGuarded, notReady, pushGate } from "./gate.mjs";
-import { refreshHook } from "./githook.mjs";
+import { hookFile, refreshHook } from "./githook.mjs";
 import { readPush, resolveTarget } from "./push.mjs";
-import { ALLOW_PRAGMA, scanCommit, scanMessage } from "./secrets.mjs";
+import { ALLOW_PRAGMA, scanCommit, scanMessage, scanPatches } from "./secrets.mjs";
 import { TEXT_PROGRAMS, callsIn, gitCall, programOf, readCommit, readLine, resolveFolder, writesTo } from "./shell.mjs";
 
 const PLUGIN_ROOT = slash(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
@@ -30,15 +30,49 @@ const short = (sha) => sha.slice(0, 8);
 // Programs that only read the files they are given, or only print.
 const READERS = new Set([
   "cat", "type", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "rg", "bat", "wc", "ls", "dir", "stat",
-  "file", "jq", "diff", "cmp", "du", "sort", "uniq", "cut", "tr", "echo", "printf", "test", "[", "get-content", "gc",
+  "file", "jq", "diff", "cmp", "du", "sort", "uniq", "cut", "tr", "echo", "printf", "test", "[", "[[", "get-content", "gc",
   "select-string", "sls", "get-childitem", "gci", "get-item", "gi", "test-path", "findstr", "write-host",
-  "write-output", "md5sum", "sha256sum",
+  "write-output", "md5sum", "sha256sum", "nl", "od", "tac", "strings", "tree", "realpath", "readlink", "basename",
+  "dirname",
 ]);
 // Programs that change no file, no commit and no branch (when they have no redirect to a file).
 const HARMLESS = new Set([
   ...READERS, "cd", "true", "false", "pwd", "sleep", "date", "which", "where", "export", "set", "read", "clear",
   "wait", ":", "exit", "return",
+  // PowerShell: the end of a pipe that only filters, counts or shows.
+  "out-null", "out-string", "out-host", "out-default", "select-object", "select", "where-object", "sort-object",
+  "measure-object", "format-table", "ft", "format-list", "fl", "convertto-json", "convertfrom-json", "write-error",
+  "write-warning", "write-verbose",
 ]);
+// What makes `find` more than a search.
+const FIND_ACTS = /^-(?:delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/;
+// PowerShell settings that only say how errors and progress are shown.
+const PS_PREFERENCE =
+  /^\$(?:global:|script:)?(?:ErrorActionPreference|ProgressPreference|WarningPreference|VerbosePreference|InformationPreference|DebugPreference|ErrorView)$/i;
+const PS_COMPARES = /^-(?:eq|ne|gt|ge|lt|le)$/i;
+
+/**
+ * PowerShell: a statement that is only a variable runs no program. `if ($?) { ... }`,
+ * `$LASTEXITCODE -eq 0` and `$ErrorActionPreference = "Stop"` are the usual ways to chain commands
+ * there, since Windows PowerShell has no `&&`.
+ */
+function readsVariable(call) {
+  if (call.ps !== true) return false;
+  const [first, second] = call.args;
+  if (call.args.length === 0) {
+    const set = call.word0.match(/^(\$[\w:]+)=(\w+)$/);
+    return set ? PS_PREFERENCE.test(set[1]) : /^\$[\w:?]+$/.test(call.word0);
+  }
+  if (!/^\$[\w:?]+$/.test(call.word0) || call.args.length !== 2 || !/^[\w$?:.-]+$/.test(second)) return false;
+  return first === "=" ? PS_PREFERENCE.test(call.word0) : PS_COMPARES.test(first);
+}
+
+/** True for a call that changes no file, no commit and no branch (a redirect to a file is judged apart). */
+function changesNothing(call) {
+  if (HARMLESS.has(call.program)) return true;
+  if (call.program === "find") return !call.args.some((arg) => FIND_ACTS.test(arg));
+  return readsVariable(call);
+}
 const COPIERS = new Set(["cp", "copy", "copy-item", "cpi", "scp", "rsync"]);
 // Programs that make folders or remove things. They cannot put new text into a file.
 const WRITES_NO_TEXT = new Set(["mkdir", "md", "rm", "rmdir", "rd", "del", "erase", "remove-item", "ri"]);
@@ -104,7 +138,7 @@ function bringsNewText(git) {
 /** True when the call changes nothing: no file, no commit, no branch. */
 function isHarmless(call) {
   if (call.redirects.some(writesTo)) return false;
-  if (call.program !== "git") return HARMLESS.has(call.program);
+  if (call.program !== "git") return changesNothing(call);
   const git = gitCall(call);
   return !git || gitOnlyReads(git);
 }
@@ -146,7 +180,13 @@ const RECORD_FOLDER = /(?:^|[^\w.-])\.git[\\/](?:[^\s"']*[\\/])?guardrails(?:[\\
 const SESSION_LOG = /[\\/]\.claude[\\/]+projects[\\/][^\s"']*\.jsonl\b/i;
 
 // git's own hooks folder holds the pre-push hook, the second check on every push (see githook.mjs).
-const PUSH_HOOK = /(?:^|[^\w.-])\.git[\\/](?:[^\s"']*[\\/])?hooks(?:[\\/]pre-push)?(?:["']|$)/i;
+// The folder itself (hooks, hooks/), the hook, or a pattern that can take it (hooks/*, hooks/pre-*).
+const PUSH_HOOK =
+  /(?:^|[^\w.-])\.git[\\/](?:[^\s"']*[\\/])?hooks(?:[\\/](?:pre-push|[^\\/\s"']*[*?[{][^\\/\s"']*)?)?(?:["']|$)/i;
+// Programs that remove or move what they are given.
+const REMOVERS = new Set([
+  "rm", "rmdir", "rd", "del", "erase", "remove-item", "ri", "mv", "move", "move-item", "mi", "ren", "rename-item", "rni",
+]);
 // A file git reads its settings from: an alias or a push rule can be written there without `git config`.
 const GIT_SETTINGS_FILE = /(?:^|[\\/])(?:\.gitconfig|\.git[\\/]config(?:\.worktree)?|gitconfig)["']?$/i;
 
@@ -163,6 +203,12 @@ function kindOf(text, call, context) {
   const plain = slash(text);
   if (RECORD_FOLDER.test(plain)) return "record";
   if (PUSH_HOOK.test(plain)) return "hook";
+  if (call.folder && (/pre-push/i.test(plain) || REMOVERS.has(call.program))) {
+    // core.hooksPath can point anywhere (.husky, .githooks). Compare with the file git really runs.
+    const hook = context.hookFile(call.folder);
+    const full = resolveFolder(call.folder, text.replace(/[\\/]+$/, ""));
+    if (hook && full && (sameText(full, hook) || sameText(full, path.posix.dirname(hook)))) return "hook";
+  }
   if (/guardrails/i.test(plain) && call.folder) {
     // A git folder can live somewhere else. Compare with the real record folder.
     const records = context.stateDir(call.folder);
@@ -171,6 +217,7 @@ function kindOf(text, call, context) {
       return "record";
   }
   if (touchesSessionLog(text, context.transcriptPath)) return "log";
+  if (GIT_SETTINGS_FILE.test(plain)) return "settings";
   if (plain.toLowerCase().includes(CONFIG_FILE)) return "config";
   return null;
 }
@@ -182,6 +229,7 @@ function onlyReads(call, arg) {
     return !git || GIT_LEAVES_ITS_ARGUMENTS.has(git.verb);
   }
   if (READERS.has(call.program)) return true;
+  if (call.program === "find") return !call.args.some((word) => FIND_ACTS.test(word));
   if (COPIERS.has(call.program)) {
     const files = named(call.args);
     return files[files.length - 1] !== arg; // the file is copied from, not written to
@@ -220,6 +268,12 @@ function judgeSelfProtection(calls, context) {
         "BLOCKED by guardrails: the approval is the one step an agent may not do.",
         "Stop here and ask the human to approve. Tell them the exact line to type in the chat.",
       ]);
+    // Without git's hooks the second check on a push does not run. This holds with the danger guard on or off.
+    if (skipsHooks(gitCall(call)))
+      return deny([
+        `BLOCKED by guardrails (skip-hooks): ${SKIPS_HOOKS}`,
+        "If a human really wants this, they run it in their own terminal.",
+      ]);
     const written = [
       ...call.redirects.filter(writesTo).map((redirect) => redirect.target),
       ...call.args.filter((arg) => !onlyReads(call, arg)),
@@ -246,6 +300,11 @@ function judgeSelfProtection(calls, context) {
           "This command changes git's hooks folder. The pre-push hook there is the second check on every push.",
           "A human should confirm a change to it.",
         ]);
+      if (kind === "settings")
+        question ??= ask([
+          "This command writes to a file git reads its settings from. The hooks folder, an alias or a push rule can be set there.",
+          "A human should confirm a change to it.",
+        ]);
     }
   }
   return question;
@@ -255,7 +314,8 @@ function judgeSelfProtection(calls, context) {
 const HIDDEN_PROGRAM = /^(?:\$|`)[^\\/]*$/;
 const SHIPS = /(?<![\w-])(?:git|push|commit)(?![\w-])/i;
 // Settings that switch a hook off, or hand git its config from outside the command line.
-const ENV_TRICK = /(?<![\w])(?:HUSKY\s*=\s*["']?0\b|GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM)\b|CLAUDECODE\b)/i;
+const ENV_TRICK =
+  /(?<![\w])(?:HUSKY\s*=\s*["']?0\b|GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM)\b|CLAUDECODE\b|AI_AGENT\b|CLAUDE_CODE_ENTRYPOINT\b)/i;
 const SETS_VARIABLES = new Set(["export", "set", "declare", "typeset", "unset", "setx", "set-item", "remove-item", "si", "ri"]);
 
 /**
@@ -486,7 +546,8 @@ function judgePush(git, state, context) {
   if (where) return where === "skip" ? null : where;
   const config = context.config(push.folder);
   if (config.error) return brokenConfig(config);
-  refreshHook(push.folder);
+  // Only the real hook does this. `guardrails check` shows an answer and writes nothing.
+  if (context.live) refreshHook(push.folder);
 
   if (state.rerouted)
     return deny([
@@ -543,6 +604,48 @@ function judgePush(git, state, context) {
     if (gate.open) return deny(notReady({ gate, head, dst: target.dst, folder: push.folder, config, cli: CLI }));
   }
   return null;
+}
+
+const AM_TAKES_NO_PATCH = /^(?:--continue|--skip|--abort|--quit|--resolved|-r|--retry|--show-current-patch(?:=.*)?)$/;
+
+/** The files a word of a `git am` line names: one file, or the files a pattern fits. */
+function patchFiles(folder, name) {
+  const file = resolveFolder(folder, name.replace(/[*?]/g, "x"));
+  if (!file) return [];
+  if (!/[*?]/.test(name)) return fs.existsSync(file) ? [file] : [];
+  const dir = path.posix.dirname(file);
+  const base = path.posix.basename(slash(name));
+  if (/[*?]/.test(slash(name).slice(0, -base.length)) || !fs.existsSync(dir)) return [];
+  const fits = new RegExp(`^${base.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
+  return fs.readdirSync(dir).filter((entry) => fits.test(entry)).map((entry) => `${dir}/${entry}`);
+}
+
+/** `git am` turns patch files into commits, so the lines they add are read like a commit's. */
+function judgeAm(git, state, context) {
+  if (git.args.some((arg) => AM_TAKES_NO_PATCH.test(arg))) return null;
+  const where = locate(git, state, "commit", context);
+  if (where) return where === "skip" ? null : where;
+  const config = context.config(git.folder);
+  if (config.error) return brokenConfig(config);
+  if (!config.secretScan.enabled) return null;
+  const fed = git.call.redirects.filter((redirect) => redirect.op === "<").map((redirect) => redirect.target);
+  const files = [...named(git.args), ...fed].flatMap((name) => patchFiles(git.folder, name));
+  if (files.length === 0 || state.ran)
+    return deny([
+      "BLOCKED by guardrails: the secret scan cannot read the patch that this `git am` turns into commits.",
+      state.ran
+        ? `On this line \`${state.ran}\` runs first and can write it, and the scan reads before the line runs.`
+        : "It comes through a pipe, a variable, or a file that is not there.",
+      "Name the patch file on the line, and send it as its own command: git am fix.patch",
+    ]);
+  const result = scanPatches(files, { allowPaths: config.secretScan.allowPaths });
+  if (result.error)
+    return deny([
+      "BLOCKED by guardrails: the secret scan could not read what this `git am` adds.",
+      `  ${result.error}`,
+      "A commit that cannot be checked is not let through.",
+    ]);
+  return secretVerdict(result);
 }
 
 const FINISHES_A_COMMIT = new Set(["rebase", "merge", "cherry-pick", "revert", "am"]);
@@ -605,9 +708,9 @@ function judgeGit(calls, context) {
           state.rerouted ??= "a change to git's settings file";
         }
       }
-      const writesText = call.redirects.some(writesTo) || !(HARMLESS.has(call.program) || WRITES_NO_TEXT.has(call.program));
+      const writesText = call.redirects.some(writesTo) || !(changesNothing(call) || WRITES_NO_TEXT.has(call.program));
       if (writesText) state.ran ??= call.program || "a redirect to a file";
-      if (!HARMLESS.has(call.program)) state.moved ??= call.program || "a redirect";
+      if (!changesNothing(call)) state.moved ??= call.program || "a redirect";
       continue;
     }
     if (/^[$@]|`/.test(git.verb))
@@ -620,6 +723,14 @@ function judgeGit(calls, context) {
         `BLOCKED by guardrails: this line runs \`${state.aliased}\` and then \`git ${git.verb}\`, a word git does not know by itself.`,
         "It may be an alias made on this same line, and the guard reads aliases before the line runs.",
         "Run the first part. Then send the second command on its own.",
+      ]);
+    // --config-env takes the value of a setting from a variable, where the guard cannot read it.
+    const outside = git.envSettings.find((name) => ROUTE_SETTING.test(name) || ALIAS_SETTING.test(name));
+    if (outside)
+      return deny([
+        `BLOCKED by guardrails: this line hands git the setting \`${outside}\` through --config-env, from a variable the guard cannot read.`,
+        "That setting can change what a git word means, where a push lands, or which hooks run.",
+        "Send the command without it.",
       ]);
     const setting = configWrite(git);
     if (setting !== null) {
@@ -637,6 +748,11 @@ function judgeGit(calls, context) {
       const spoken = judgeMessage(git, state, context);
       if (spoken?.decision === "deny") return spoken;
       question ??= spoken;
+    }
+    if (git.verb === "am") {
+      const patched = judgeAm(git, state, context);
+      if (patched?.decision === "deny") return patched;
+      question ??= patched;
     }
     // `git rebase --continue` (and merge, cherry-pick, revert, am) commits what is staged.
     const finishes = FINISHES_A_COMMIT.has(git.verb) && git.args.includes("--continue");
@@ -744,8 +860,10 @@ function memo(compute) {
 /**
  * Verdict for a shell command: { decision: "allow" | "deny" | "ask", reason? }
  * `shell` is "powershell" when the command is PowerShell; anything else is read as Bash.
+ * `live` is true in the real hook, where a stale pre-push hook may be written again. Without it
+ * the verdict is only shown, and nothing is written.
  */
-export function judgeCommand({ command, cwd, transcriptPath, shell }) {
+export function judgeCommand({ command, cwd, transcriptPath, shell, live = false }) {
   const text = String(command ?? "");
   if (!text.trim()) return ALLOW;
   const line = stage("reading the command", () => readLine(text, cwd, { shell }));
@@ -757,8 +875,10 @@ export function judgeCommand({ command, cwd, transcriptPath, shell }) {
   const context = {
     text,
     transcriptPath,
+    live: live === true,
     config: memo((folder) => loadConfig(folder)),
     stateDir: memo((folder) => stateDir(folder)),
+    hookFile: memo((folder) => hookFile(folder)),
     isRepo: memo((folder) => tryGit(["rev-parse", "--git-dir"], folder) !== null),
     gitWorks: memo(() => tryGit(["--version"]) !== null),
     alias: memo((folder, verb) => tryGit(["config", "--get", `alias.${verb}`], folder)),
@@ -810,19 +930,57 @@ export function judgeCommand({ command, cwd, transcriptPath, shell }) {
   return question ?? ALLOW;
 }
 
-/** Verdict for a file the agent wants to write. */
-export function judgeEdit({ filePath, transcriptPath }) {
+/** The nearest folder above a file that exists, or null. */
+function folderOf(file) {
+  let dir = path.posix.dirname(file);
+  while (!fs.existsSync(dir)) {
+    const up = path.posix.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+  return dir;
+}
+
+/**
+ * A git folder can have another name (a separate git folder, a bare repository with worktrees),
+ * and core.hooksPath can point anywhere. So git is asked where the records and the hook really are:
+ * "record", "hook" or null. Only a path that could be one of them costs a call to git.
+ */
+function protectedPlace(file, cwd) {
+  const couldBeRecord = /(?:^|\/)guardrails\//i.test(file);
+  const couldBeHook = sameText(path.posix.basename(file), "pre-push");
+  if (!couldBeRecord && !couldBeHook) return null;
+  const full = resolveFolder(cwd ? slash(cwd) : null, file);
+  if (!full) return null;
+  // The repository the file is in, and the one the session works in.
+  for (const folder of new Set([folderOf(full), cwd ? slash(cwd) : null].filter(Boolean))) {
+    const records = couldBeRecord ? stateDir(folder) : null;
+    if (records && sameText(full.slice(0, records.length + 1), `${records}/`)) return "record";
+    const hook = couldBeHook ? hookFile(folder) : null;
+    if (hook && sameText(full, hook)) return "hook";
+  }
+  return null;
+}
+
+/** Verdict for a file the agent wants to write. `cwd` is the folder the session works in. */
+export function judgeEdit({ filePath, transcriptPath, cwd }) {
   const file = slash(filePath ?? "");
   if (file && touchesSessionLog(file, transcriptPath))
     return deny(["BLOCKED by guardrails: the session log is the record of what the human typed. It is not edited."]);
-  if (RECORD_FOLDER.test(file))
+  const place = file ? protectedPlace(file, cwd) : null;
+  if (RECORD_FOLDER.test(file) || place === "record")
     return deny([
       "BLOCKED by guardrails: records of tests, reviews and approvals are not edited by hand.",
       "They are written by the guardrails command, after the real thing happened.",
     ]);
-  if (PUSH_HOOK.test(file))
+  if (PUSH_HOOK.test(file) || place === "hook")
     return ask([
       "This file is in git's hooks folder. The pre-push hook there is the second check on every push.",
+      "A human should confirm a change to it.",
+    ]);
+  if (GIT_SETTINGS_FILE.test(file))
+    return ask([
+      "git reads its settings from this file. The hooks folder, an alias or a push rule can be set there.",
       "A human should confirm a change to it.",
     ]);
   if (sameText(path.posix.basename(file), CONFIG_FILE))

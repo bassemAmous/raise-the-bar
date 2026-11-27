@@ -203,6 +203,8 @@ export function loadConfig(cwd) {
     problems.push('"onGuardError" must be "allow" or "deny"');
     config.onGuardError = DEFAULTS.onGuardError;
   }
+  // A key the guard does not know changes nothing. `status` names it, so a typing mistake shows.
+  config.unknown = Object.keys(user).filter((key) => !(key in DEFAULTS));
   config.file = file ? slash(file) : null;
   config.error = problems.length ? problems.join("; ") : null;
   return config;
@@ -245,3 +247,17 @@ export function appendAudit(dir, entry) {
     // The audit line is a record, not a gate: a read-only disk must not stop work.
   }
 }
+
+/**
+ * A person's own settings change what `git diff` prints: diff.noprefix and diff.mnemonicPrefix
+ * change the file names, diff.relative leaves out files of other folders. The guard reads one fixed form.
+ */
+export const PLAIN_DIFF = [
+  "-c", "core.quotePath=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "-c", "diff.relative=false",
+];
+
+// Set in every shell an agent runs commands in. A person's own shell has none of them.
+export const AGENT_MARKERS = ["CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_ENTRYPOINT"];
+
+/** True when this process was started from an agent's shell. */
+export const isAgentShell = (env = process.env) => AGENT_MARKERS.some((name) => Boolean(env[name]));

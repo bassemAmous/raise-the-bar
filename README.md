@@ -142,7 +142,7 @@ config file with no project-specific rules.
 ## Development
 
 ```
-node --test plugins/guardrails/tests/guardrails.test.mjs   # 40 tests on real temporary git repositories
+node --test plugins/guardrails/tests/guardrails.test.mjs   # 49 tests on real temporary git repositories
 node --test plugins/council/skills/boardroom/scripts/check-numbers.test.mjs
 node scripts/check-repo.mjs                                 # skill descriptions, versions, the marketplace file
 claude plugin validate .                                    # the marketplace file
