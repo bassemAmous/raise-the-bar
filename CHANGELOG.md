@@ -3,6 +3,30 @@
 A plugin's `version` changes whenever its files change. People who already installed a plugin get
 the new copy only then.
 
+## 0.3.1
+
+`no-echo` and the marketplace file. `no-yolo` and `no-slop` stay at 0.3.0.
+
+### Fixed
+
+- **The old name `guardrails` is listed again.** 0.3.0 dropped it from the marketplace file, so a
+  person who had installed `guardrails@raise-the-bar` could lose the guard hooks on update. The
+  name now points at `no-yolo` and installs the same plugin. `check-repo.mjs` refuses a pull
+  request that drops a name which shipped hooks.
+- `story-or-snore`: `check-story.mjs` said "Clean." for a talk with an invented money claim. It now
+  refuses a number (digits or words, with its unit) that is in none of the facts the person gave,
+  example data that is not said to be an example, and "pays for itself", "guaranteed", "first
+  ever" or "<product> is the only" when no fact says so. The talk file has a new `## Facts`
+  section. A talk file without it still runs and gets a warning.
+- `story-or-snore`: the check passed a 5:00 talk whose words needed 2:28. Words that need under
+  70% of the planned time are now a warning, words that need more than the limit are a finding,
+  and a warning takes "Clean." off the last line. A beat of 50, 90, 100, 110 or 170 seconds and
+  more was allowed one second over the 10% rule, from a rounding slip.
+- `story-or-snore`: the beat sheet has ready seconds for 3, 5 and 10 minutes and a rule for other
+  slots. The skill says how to run the check by hand, what to do with a one-shot request, that
+  demo data is labelled as example data, and that the show of hands comes within the first 10
+  seconds even when the hook beat is 15.
+
 ## 0.3.0
 
 All three plugins. **Breaking: the plugins and skills have new names, so the old slash commands

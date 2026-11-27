@@ -54,6 +54,17 @@
         "storytelling",
         "presentation"
       ]
+    },
+    {
+      "name": "guardrails",
+      "source": "./plugins/no-yolo",
+      "description": "Old name of no-yolo, kept so that an update does not switch the guard hooks off for people who installed guardrails. It installs the same plugin. For a new install, use no-yolo.",
+      "category": "development",
+      "keywords": [
+        "guardrails",
+        "no-yolo",
+        "hooks"
+      ]
     }
   ]
 }

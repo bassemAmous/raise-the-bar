@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Checks the repository itself, with no dependencies:
 //   1. every skill description says what the skill is not for, and no two skills share a trigger phrase;
-//   2. every plugin has a version, and the marketplace file lists the same plugins with the same words;
-//   3. with --base <ref>: a plugin whose files changed since <ref> has a new version.
+//   2. every plugin has a version, and the marketplace file lists the same plugins with the same words.
+//      One more entry is allowed for an old name of a plugin: it points at that plugin and names it;
+//   3. with --base <ref>: a plugin whose files changed since <ref> has a new version, and a plugin
+//      that shipped hooks at <ref> is still listed under the name people installed.
 // Run: node scripts/check-repo.mjs [--base origin/main]
 // Exit code 0 means clean, 1 means a finding, 2 means the check itself could not run.
 import { execFileSync } from "node:child_process";
@@ -13,7 +15,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const problems = [];
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
-const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+// git's own error text is kept out of the output: a path that is missing at <ref> is an answer here.
+const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+/** "./plugins/no-yolo" -> "plugins/no-yolo". Null for a source that is not a folder of this repository. */
+const folderOf = (source) => (typeof source === "string" && source.startsWith("./") ? source.replace(/^\.\/|\/+$/g, "") : null);
 
 /** The `description` of a SKILL.md, whether it is written on one line or folded over several. */
 export function descriptionOf(text) {
@@ -87,7 +92,38 @@ function checkManifests() {
       problems.push(`plugins/${name}: the marketplace file and plugin.json describe it with different words`);
     listed.delete(name);
   }
-  for (const name of listed.keys()) problems.push(`marketplace.json lists "${name}", but plugins/${name} has no plugin.json`);
+  // What is left has no folder of its own. It may be the old name of a plugin that was renamed.
+  for (const [name, entry] of listed) {
+    const target = path.posix.basename(folderOf(entry.source) ?? "");
+    if (!plugins().includes(target) || folderOf(entry.source) !== `plugins/${target}`)
+      problems.push(`marketplace.json lists "${name}", but plugins/${name} has no plugin.json`);
+    else if (!entry.description?.includes(target))
+      problems.push(`marketplace.json: "${name}" is an old name of plugins/${target}, and its description does not say "${target}"`);
+  }
+  return listed.size;
+}
+
+/**
+ * Hooks protect people without a word, and they stop without a word too: Claude Code no longer
+ * loads a plugin whose name left the marketplace file. So a name that shipped hooks stays listed.
+ */
+function checkHookNamesKept(base) {
+  let before;
+  try {
+    before = JSON.parse(git("show", `${base}:.claude-plugin/marketplace.json`));
+  } catch {
+    return; // no marketplace file at <ref>: nobody installed from it
+  }
+  const listedNow = new Set(readJson(path.join(ROOT, ".claude-plugin", "marketplace.json")).plugins.map((plugin) => plugin.name));
+  for (const entry of before.plugins ?? []) {
+    const folder = folderOf(entry.source);
+    const shippedHooks = folder !== null && git("ls-tree", "-r", "--name-only", base, "--", `${folder}/hooks/hooks.json`) !== "";
+    if (shippedHooks && !listedNow.has(entry.name))
+      problems.push(
+        `"${entry.name}" shipped hooks at ${base} and is no longer listed in marketplace.json. Someone who installed it under that name ` +
+          `loses the hooks on the next update. Keep an entry named "${entry.name}" whose source is the plugin that has the hooks now.`,
+      );
+  }
 }
 
 /** People who installed a plugin get a change only when its version is new. */
@@ -119,13 +155,15 @@ function main() {
     process.exit(2);
   }
   const count = checkSkills();
-  checkManifests();
+  const oldNames = checkManifests();
   if (base) checkVersionBumps(base);
+  if (base) checkHookNamesKept(base);
   if (problems.length) {
     process.stderr.write(`${problems.map((problem) => `- ${problem}`).join("\n")}\n${problems.length} problem(s).\n`);
     process.exit(1);
   }
-  process.stdout.write(`check-repo: ${count} skills, ${plugins().length} plugins${base ? `, versions checked against ${base}` : ""}. Clean.\n`);
+  const kept = oldNames ? `, ${oldNames} old name(s) kept` : "";
+  process.stdout.write(`check-repo: ${count} skills, ${plugins().length} plugins${kept}${base ? `, versions checked against ${base}` : ""}. Clean.\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

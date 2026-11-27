@@ -48,9 +48,11 @@ is the rule in the code. Four bitter soups are what the logs show after she reti
   breaks. It never develops a story you did not choose.
 - **The talk is checked by a script.** `check-story.mjs` reads the talk file and fails on a story
   element with two meanings, an open gap, a stock image (iceberg, rocket, puzzle piece), a beat
-  with more words than its seconds, a total over the limit, a word you asked to avoid, a product
-  name in the first 15 seconds, and an ending that repeats nothing from the opening. It compares
-  words, not meaning, and says so in its header. It has its own tests, run in CI.
+  with more words than its seconds, a total over the limit, a number or a promise ("pays for
+  itself") that is in none of the facts you gave, a word you asked to avoid, a product name in the
+  first 15 seconds, and an ending that repeats nothing from the opening. It warns when the words
+  fill under 70% of the time. It compares words and values, not meaning, and says so in its
+  header. It has its own tests, run in CI.
 - **No dependency.** The deck look and the optional explainer video are described, with no
   script. Rendering a video needs Playwright and ffmpeg, installed by you.
 - **Music is licensed or yours.** Never a copyrighted track.

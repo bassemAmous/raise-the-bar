@@ -138,6 +138,9 @@ work. Uninstall each plugin under its old name and install it under the new one,
 /plugin install no-yolo@raise-the-bar
 ```
 
+Until you do, `guardrails@raise-the-bar` still installs the same guard, so an update does not
+switch the hooks off (since 0.3.1).
+
 The guard keeps its own name: the `guardrails` command, `guardrails.config.json`, the
 `BLOCKED by guardrails` messages and the `guardrails:allow-secret` mark are unchanged, so existing
 setups keep working. Each skill still answers to its old name in plain words.
@@ -204,6 +207,7 @@ node --test plugins/no-yolo/tests/guardrails.test.mjs      # 49 tests on real te
 node --test plugins/no-echo/skills/let-them-fight/scripts/check-numbers.test.mjs
 node --test plugins/no-echo/skills/story-or-snore/scripts/check-story.test.mjs
 node --test plugins/no-slop/skills/show-me-red/scripts/scripts.test.mjs
+node --test scripts/check-repo.test.mjs
 node scripts/check-repo.mjs                                    # skill descriptions, versions, the marketplace file
 claude plugin validate .                                       # the marketplace file
 claude plugin validate plugins/no-yolo                         # each plugin

@@ -7,7 +7,8 @@ description: >-
   real product, scored and stress-tested for where it breaks, then stops so the person picks.
   Builds the pick into a locked story-to-product ledger, a beat sheet with seconds, the spoken
   script and one visible line per slide, and runs a script that fails when one story element means
-  two things, the words do not fit the time or the story leans on a stock image. Use when the user
+  two things, the words do not fit the time, a number is in none of the facts the person gave or
+  the story leans on a stock image. Use when the user
   says "make my pitch a story", "my talk is boring", "find me a metaphor", "give the talk a hook",
   "a story behind it" or "nobody will remember this talk", and before a hackathon pitch, a demo
   day, an all-hands, a sales talk or a change announcement. Not for attacking the plan behind the
@@ -61,6 +62,8 @@ Before inventing anything, write 5 to 8 lines:
   things break, so nobody knows why, until someone finds it and writes it down."
 - **The setting:** audience, minutes, language, room or call, and the person's own rules (words to
   avoid, the look, the music).
+- **The facts:** every number, price, result and promise the person gave, in their words. Nothing
+  else is said as a fact later. Step 5 refuses a number that is not on this list.
 
 Ask at most three questions, once, and only when the answer would change the options. Otherwise
 state your assumptions in one line and go on.
@@ -79,6 +82,8 @@ Read `references/story-craft.md`. Each option comes from a different everyday wo
 
 Give your pick first, with one line of why. Offer a mix (opener, main story, closer) only when it
 is clearly stronger. Then ask the person to choose, and **stop**.
+One-shot request (the person asked for the finished talk in one go, or cannot answer): build the
+top-scored story, say that you picked it and why, and offer the next two in one line.
 Why: the pick is a matter of taste and of knowing the room. In the worked example the person chose
 Grandma over a story that scored higher. Warmth beat coverage, and the gaps were closed afterwards.
 
@@ -95,9 +100,11 @@ Why: the ledger is the contract. Each slide line, spoken line and video scene is
 
 ### 4. Write the talk file
 
-Read `references/beats-and-script.md`. Write `talk.md` in its format: the settings, the ledger and
-one beat per slide with its seconds, one visible `Line:` and the spoken `Say:` text. Mark:
-- the hook: the audience takes part in the first 10 seconds, and no product name yet
+Read `references/beats-and-script.md`. Write `talk.md` in its format: the settings, the facts from
+step 1, the ledger and one beat per slide with its seconds, one visible `Line:` and the spoken
+`Say:` text. Take the seconds from its rows for 3, 5 and 10 minutes. Mark:
+- the hook: the audience takes part within the first 10 seconds, however long the hook beat is,
+  and the product is not named in the first 15 seconds
 - the turn: "Our code has grandmas too", then the ledger said out loud
 - where the talk leaves the story and speaks plainly
 - the peak: the live demo, with a plan B
@@ -111,12 +118,29 @@ Keep the file where the person can open it, never only in a temporary folder.
 node "${CLAUDE_PLUGIN_ROOT}/skills/story-or-snore/scripts/check-story.mjs" talk.md
 ```
 
+Run by hand, `${CLAUDE_PLUGIN_ROOT}` is not set: give the path of this skill's folder instead.
+PowerShell: `node "C:\path\to\story-or-snore\scripts\check-story.mjs" talk.md`.
+bash: `node /path/to/story-or-snore/scripts/check-story.mjs talk.md`.
+
 It fails on a double meaning, an open gap, a stock image, a story element no beat says, a missing
-or long line, a beat with more words than its seconds, a total over the limit, a word the person
-asked to avoid, a changed phrase of theirs, a product name in the first 15 seconds, and an ending
-that repeats nothing from the opening. Fix the talk, not the check. Quote its last line.
+or long line, a word the person asked to avoid, a changed phrase of theirs, a product name in the
+first 15 seconds, and an ending that repeats nothing from the opening.
+
+It fails on an invented fact: a number (digits or words, "forty", "18 percent", "29 euros") that
+is in no `## Facts` row, ledger row or `Keep:` phrase; example data in a beat that never says
+"example"; and "pays for itself", "guaranteed", "first ever" or "<product> is the only" when no
+fact says so. It compares values, not meaning, so still read every number yourself.
+
+The time rule, at 140 spoken words a minute unless `Pace:` says otherwise:
+- **Finding:** a beat whose words need more than 110% of its seconds, and beats or words that add
+  up to more than the limit.
+- **Warning:** words that need less than 70% of the planned seconds. Content is missing, or the
+  seconds are a guess. One long silent demo is the only good reason.
+
+A warning does not fail the check, but the last line is then not `Clean.` A talk file with no
+`## Facts` section gets one too. Fix the talk, not the check. Quote its last line.
 Why: every one of these happened in a real talk, and none of them shows when you read your own
-script.
+script. A first draft once added a money claim nobody gave, and the old check said "Clean."
 
 ### 6. Show the words, then stop
 
@@ -140,7 +164,8 @@ know the product.
 Step 2 uses the options message in `references/story-craft.md`. The hand-over is:
 
 ```
-Story: <name> | Talk: <minutes> of <limit> | check-story: Clean | <N> finding(s), each explained
+Story: <name> | Talk: <minutes> of <limit> | check-story: <its last line>
+Kept: <each finding or warning you kept, with its reason; "none" when the line is Clean.>
 Ledger: <real part> = <story element> (one row per pair; plain parts listed last)
 Lines: <beat number>. <the visible line>
 Tagline: <the closing line>
@@ -151,14 +176,18 @@ Not checked: <what no script or reader verified>
 
 ## Hard rules
 
-- Never develop a story the person has not picked.
+- Never develop a story the person has not picked. The one exception is the one-shot request of
+  step 2, and the reply says which story was picked and why.
 - Never invent a statistic, a quote, a user count or a result. A placeholder such as `[X]` stays
   until a real run fills it. Say "most likely cause", never "the cause".
+- Demo data is labelled as example data. A number that exists only in the demo ("butter runs out
+  in two days") sits on an `Example:` row in `## Facts`, and its beat says "example" or "demo".
 - No real brand and no real person inside the story or its pictures.
 - Music is licensed for reuse with its credit shown, or generated or made by the person. Never a
   copyrighted track, not even ten seconds of it. No generated music if the person said so.
 - Ask before publishing anything other people can see.
-- The check is not edited to pass. A finding you keep is named in the hand-over with its reason.
+- The check is not edited to pass, and no fact is added to `## Facts` to make a number pass. A
+  finding or warning you keep is named in the hand-over with its reason.
 
 ## Common mistakes
 

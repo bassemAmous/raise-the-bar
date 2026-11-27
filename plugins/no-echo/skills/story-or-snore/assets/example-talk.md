@@ -9,6 +9,15 @@ Pace: 140
 Avoid: left, gone, died
 Keep: Grandma can retire. Her secrets stay.
 
+## Facts
+
+- Footnote does four jobs: it finds the rules, maps the projects that use each rule, warns when
+  the ticket and the code disagree, and names the most likely cause of a break.
+- The test: 10 breaks planted in a test project. Not run yet: how many it finds ([X]) and how
+  many false alarms it gives ([Y]).
+- Example: the demo rule is "refunds within thirty days". The demo changes thirty to three. Three
+  projects use that rule.
+
 ## Ledger
 
 | Real part | Story element | First beat |
@@ -54,10 +63,11 @@ the logs and names the most likely cause.
 
 ### 6. The peak: live demo (55 s)
 Line: One rule changed. Footnote finds it and says why.
-Say: Here is a rule: refunds within thirty days. I change one line. Thirty becomes three.
-(Change it. Stay quiet until the answer is on screen.) Now I ask Footnote what broke. It found
-the rule. It shows the three projects that use it. It shows the ticket that still says thirty.
-And it shows the first refund that was refused. Most likely cause: this one line.
+Say: Here is an example rule: refunds within thirty days. I change one line. Thirty becomes three.
+(Change it. Stay quiet until the answer is on screen.) Nobody would notice a change this small.
+Now I ask Footnote what broke. It found the rule. It shows the three projects that use it. It
+shows the ticket that still says thirty. And it shows the first refund that was refused. Most
+likely cause: this one line.
 (Plan B is a recording. Introduce it with: here is the same run from this morning.)
 
 ### 7. Proof (10 s)

@@ -25,6 +25,12 @@ Avoid: left, gone
 Keep: Grandma can retire. Her secrets stay.
 Allow: bridge
 
+## Facts
+
+- Footnote does four jobs: it finds the rules, maps the projects, warns and names the cause.
+- The test: 10 breaks planted in a test project. The results are not measured yet.
+- Example: the demo rule is "refunds within thirty days".
+
 ## Ledger
 
 | Real part | Story element | First beat |
@@ -51,8 +57,17 @@ The settings, one per row, nothing else on the row:
 - `Allow:` a stock image the person asked for by name.
 
 Rules of the format:
-- A beat heading is `### <number>. <name> (<seconds> s)`. A heading with no seconds is not timed
-  and not checked. Use that for a backup slide.
+- `## Facts` holds what the person gave, one list item per fact, in their words: every number,
+  price, result and promise the talk may say. The check refuses a number in a `Line:` or in `Say:`
+  that is in no fact, no ledger row and no `Keep:` phrase. "40" and "forty" are the same number. A
+  number said with a unit ("18 percent", "29 euros") needs a fact with that unit. The word "one"
+  alone is not counted.
+- A fact that starts with `Example:` is demo data, not a result. Its numbers pass only in a beat
+  that says "example" or "demo" out loud or on the slide.
+- An empty `## Facts` section means the person gave no number. A file with no such section still
+  runs, as talk files written before it did, and the check warns that no fact was checked.
+- A beat heading is `### <number>. <name> (<seconds> s)`. A heading with no seconds is not timed.
+  Only its numbers and claim words are checked. Use that for a backup slide.
 - `Line:` is the one sentence the audience sees on the slide. `Say:` is what the speaker says, and
   it may run over several rows. A blank row ends it.
 - Text in (parentheses) inside `Say:` is a stage direction. It is not counted as spoken.
@@ -75,20 +90,31 @@ Write it before the first beat. One row per real part:
 Check every line you write against it. If a story element needs a second meaning, choose a new
 element. A story element nobody says out loud is removed from the ledger.
 
-## 3. The beat sheet (a 3-minute pitch; scale it to the slot)
+## 3. The beat sheet
 
-| # | Beat | Seconds | What happens |
-|---|---|---|---|
-| 1 | Hook | 10 | A show of hands on the everyday version. Pause two seconds and look at the hands. No product name. |
-| 2 | The secret | 20 | The person who knows, and the one concrete detail. Why was it never written down? "Why would she? She was always there." |
-| 3 | The loss | 20 | The gentle loss. The copies go wrong, and everyone blames the wrong thing. |
-| 4 | The turn | 20 to 25 | "Our code has grandmas too." Say the ledger out loud. Then leave the story and speak plainly. |
-| 5 | Why the obvious fixes fail (optional) | 15 to 30 | Why the usual tools do not solve it. One picture or one small table. |
-| 6 | The answer | 20 | The product and its jobs, one plain line each. |
-| 7 | The peak: live demo | 45 to 60 | One change, one answer. Stay quiet while it runs, then read the result line by line. Plan B is a recording, with the sentence that introduces it. |
-| 8 | Proof | 10 | Real numbers only. Placeholders such as `[X] of 10` stay until a real run fills them. |
-| 9 | The end | 10 to 15 | The real object, one new line, the tagline. Stop and let it land. |
-| 10 | Backup | not timed | The explainer video, after "Questions?". |
+Seconds per beat for a slot of 3, 5 or 10 minutes. Copy the column for your slot.
+
+| # | Beat | 3:00 | 5:00 | 10:00 | What happens |
+|---|---|---|---|---|---|
+| 1 | Hook | 10 | 15 | 15 | A show of hands on the everyday version, within the first 10 seconds. Pause two seconds and look at the hands. No product name. |
+| 2 | The secret | 20 | 30 | 50 | The person who knows, and the one concrete detail. Why was it never written down? "Why would she? She was always there." |
+| 3 | The loss | 20 | 30 | 50 | The gentle loss. The copies go wrong, and everyone blames the wrong thing. |
+| 4 | The turn | 25 | 35 | 60 | "Our code has grandmas too." Say the ledger out loud. Then leave the story and speak plainly. |
+| 5 | Why the obvious fixes fail | none | 25 | 60 | Why the usual tools do not solve it. One picture or one small table. |
+| 6 | The answer | 20 | 35 | 75 | The product and its jobs, one plain line each. |
+| 7 | The peak: live demo | 55 | 85 | 180 | One change, one answer. Stay quiet while it runs, then read the result line by line. Plan B is a recording, with the sentence that introduces it. |
+| 8 | Proof | 10 | 15 | 50 | Real numbers only. Placeholders such as `[X] of 10` stay until a real run fills them. |
+| 9 | The end | 15 | 20 | 45 | The real object, one new line, the tagline. Stop and let it land. |
+|   | **Planned** | 2:55 | 4:50 | 9:45 | The sum of the column, a little under the limit. |
+|   | **Spoken words** | 290 to 420 | 475 to 700 | 960 to 1,400 | About. Under the range the check warns. Over it the check fails. |
+| 10 | Backup | not timed | not timed | not timed | The explainer video, after "Questions?". |
+
+**Scaling to another slot.** Plan about 97% of the limit and keep these shares: the story (beats 2
+and 3) about a fifth, the turn about an eighth, the demo just under a third. The hook stays at 10
+to 15 seconds whatever the slot, and the show of hands still comes within the first 10. What grows
+with the slot is the plain part (beats 5 and 6) and the proof. Under 5 minutes, leave beat 5 out.
+Then write about 2.3 words for each second (140 a minute), and never less than 70% of that in
+total.
 
 Beat 5 is where added slides land. They cost time, so say how much: two slides of 15 seconds each
 turned a talk just under three minutes into three and a half.
@@ -99,7 +125,12 @@ turned a talk just under three minutes into three and a half.
   second language, or a language with longer words, needs 10 to 15% more time for the same content.
   Set `Pace:` lower for them.
 - The check counts the spoken words of each beat and compares them with the beat's seconds. A beat
-  more than 10% over is a finding. Pauses and the demo itself are not words, so leave room.
+  whose words need more than 110% of its seconds is a finding. So are beats, or words, that add up
+  to more than the limit.
+- Words that need less than 70% of the planned seconds are a warning: content is missing, or the
+  seconds are a guess. The other 30% is for the pauses, the show of hands and the quiet part of the
+  demo. If one long silent demo takes the talk under 70%, keep the warning and say why in the
+  hand-over.
 - Report it like this: "Total 3:20, limit 3:00. To cut 20 seconds, shorten beat 6 to two jobs."
 - When a slide is added later, change the seconds and run the check again.
 
@@ -126,7 +157,8 @@ Show the lines to the person before you build anything. These are the words they
 - Write short sentences, as people speak.
 - Put stage directions in parentheses: "(Raise your own hand as you ask.)", "(Stay quiet until the
   answer is on screen.)", "(From here on, talk plainly. Grandma comes back at the close.)".
-- The first 15 seconds hold no product name and no definition.
+- The first 15 seconds hold no product name and no definition. The show of hands comes within the
+  first 10, also when the hook beat is 15 seconds long.
 - After beats 1 and 2, a stranger can retell the story in one sentence. Try it on one.
 
 ## 7. The object at the end
@@ -142,3 +174,7 @@ stage direction, and put "bring the object" on the hand-over list.
   together through one rule".
 - Fill proof numbers only from a real run. Until then the placeholders stay visible, and the check
   lists them.
+- Say only numbers that are in `## Facts`. Never add a fact there to make a number pass: a fact
+  comes from the person.
+- A number that only the demo shows ("butter runs out in two days") is example data. Put it on an
+  `Example:` row and say "example" or "demo" in that beat, so nobody takes it for a result.
