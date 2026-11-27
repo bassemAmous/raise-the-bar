@@ -43,8 +43,15 @@ export function replaceExactlyOnce(text, { name, from, to }) {
   return parts.join(to);
 }
 
+/** True when `child` is strictly inside `parent` (both resolved). */
+const isInside = (parent, child) => {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+};
+
 function buildMutant(config, mutant) {
   const root = path.join(config.out, mutant.name);
+  if (!isInside(config.out, root)) throw new Error(`mutant-${mutant.name}: its folder must stay inside "out"`);
   const copy = path.join(root, "package");
   fs.rmSync(root, { recursive: true, force: true });
   fs.cpSync(config.package, copy, { recursive: true });
@@ -64,7 +71,10 @@ export function makeMutants(config) {
     if (typeof config[key] !== "string" || !config[key]) throw new Error(`config needs "${key}"`);
   if (!Array.isArray(config.mutants) || config.mutants.length === 0) throw new Error('config needs a non-empty "mutants" list');
   for (const { name } of config.mutants)
-    if (!/^[A-Za-z0-9._-]+$/.test(name ?? "")) throw new Error(`mutant name "${name}" must be letters, digits, dot, dash or underscore`);
+    // A name made only of dots ("." or "..") would point at the output folder or its parent.
+    if (!/^(?!\.+$)[A-Za-z0-9._-]+$/.test(name ?? "")) throw new Error(`mutant name "${name}" must be letters, digits, dot, dash or underscore, and not only dots`);
+  // The bundle is a path inside the package; a "../" path would edit a file outside the copy.
+  if (!isInside("package", path.join("package", config.bundle))) throw new Error(`"bundle" must stay inside the package: "${config.bundle}"`);
   fs.mkdirSync(config.out, { recursive: true });
   const listed = (config.listed ?? []).map(({ name, package: dir, tarball }) => ({
     name,

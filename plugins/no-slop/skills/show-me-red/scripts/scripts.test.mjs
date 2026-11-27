@@ -174,4 +174,18 @@ test("a mutant name that could escape the output folder is refused", () => {
     () => makeMutants({ package: pkg, bundle: "dist/index.js", out: path.join(ROOT, "bad-out"), mutants: [{ name: "../x", from: "de-DE", to: "x" }] }),
     /must be letters/,
   );
+  for (const name of [".", ".."])
+    assert.throws(
+      () => makeMutants({ package: pkg, bundle: "dist/index.js", out: path.join(ROOT, "bad-out"), mutants: [{ name, from: "de-DE", to: "x" }] }),
+      /must be letters/,
+      `the name "${name}" must be refused`,
+    );
+});
+
+test("a bundle path that leaves the package copy is refused", () => {
+  const pkg = fakePackage("bad-bundle");
+  assert.throws(
+    () => makeMutants({ package: pkg, bundle: "../../outside.js", out: path.join(ROOT, "bad-bundle-out"), mutants: [{ name: "m", from: "de-DE", to: "x" }] }),
+    /must stay inside/,
+  );
 });
