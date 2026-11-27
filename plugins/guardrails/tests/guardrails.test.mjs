@@ -1504,6 +1504,14 @@ test("the hooks folder, git's settings file and the records are found where git 
   const bare = path.join(base, "project", ".bare");
   sh(base, "init", "-q", "--bare", "-b", "main", bare);
   assert.equal(judgeEdit({ filePath: path.join(bare, "guardrails", "approval", "x.json"), cwd: base }).decision, "deny");
+
+  // git reports the real path. The same place written through a link is still the same place.
+  const link = path.join(base, "by-link");
+  fs.symlinkSync(gitdir, link, "junction");
+  assert.equal(judgeEdit({ filePath: path.join(link, "hooks", "pre-push"), cwd: work }).decision, "ask");
+  assert.equal(judgeEdit({ filePath: path.join(link, "guardrails", "approval", "x.json"), cwd: work }).decision, "deny");
+  assert.equal(verdictOf(work, `rm ${unix(path.join(link, "hooks", "pre-push"))}`), "ask");
+  assert.equal(verdictOf(work, `rm -rf ${unix(path.join(link, "guardrails"))}`), "deny");
 });
 
 test("git am: the patch is read like a commit", () => {

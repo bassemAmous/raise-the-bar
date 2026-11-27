@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalFor } from "./approval.mjs";
-import { CONFIG_FILE, commitOf, loadConfig, repoRoot, slash, stateDir, tryGit } from "./core.mjs";
+import { CONFIG_FILE, commitOf, loadConfig, repoRoot, slash, stateDir, truePath, tryGit } from "./core.mjs";
 import { SKIPS_HOOKS, dangerIn, skipsHooks } from "./danger.mjs";
 import { isGuarded, notReady, pushGate } from "./gate.mjs";
 import { hookFile, refreshHook } from "./githook.mjs";
@@ -191,6 +191,12 @@ const REMOVERS = new Set([
 const GIT_SETTINGS_FILE = /(?:^|[\\/])(?:\.gitconfig|\.git[\\/]config(?:\.worktree)?|gitconfig)["']?$/i;
 
 const sameText = (a, b) => a.toLowerCase() === b.toLowerCase();
+// Two spellings of one place: through a link, or with a Windows short name.
+const samePlace = (a, b) => sameText(truePath(a), truePath(b));
+const insidePlace = (inner, outer) => {
+  const folder = `${truePath(outer)}/`;
+  return sameText(truePath(inner).slice(0, folder.length), folder);
+};
 
 function touchesSessionLog(text, transcriptPath) {
   if (SESSION_LOG.test(text)) return true;
@@ -207,14 +213,13 @@ function kindOf(text, call, context) {
     // core.hooksPath can point anywhere (.husky, .githooks). Compare with the file git really runs.
     const hook = context.hookFile(call.folder);
     const full = resolveFolder(call.folder, text.replace(/[\\/]+$/, ""));
-    if (hook && full && (sameText(full, hook) || sameText(full, path.posix.dirname(hook)))) return "hook";
+    if (hook && full && (samePlace(full, hook) || samePlace(full, path.posix.dirname(hook)))) return "hook";
   }
   if (/guardrails/i.test(plain) && call.folder) {
     // A git folder can live somewhere else. Compare with the real record folder.
     const records = context.stateDir(call.folder);
     const full = resolveFolder(call.folder, text);
-    if (records && full && (sameText(full, records) || sameText(full.slice(0, records.length + 1), `${records}/`)))
-      return "record";
+    if (records && full && (samePlace(full, records) || insidePlace(full, records))) return "record";
   }
   if (touchesSessionLog(text, context.transcriptPath)) return "log";
   if (GIT_SETTINGS_FILE.test(plain)) return "settings";
@@ -955,9 +960,9 @@ function protectedPlace(file, cwd) {
   // The repository the file is in, and the one the session works in.
   for (const folder of new Set([folderOf(full), cwd ? slash(cwd) : null].filter(Boolean))) {
     const records = couldBeRecord ? stateDir(folder) : null;
-    if (records && sameText(full.slice(0, records.length + 1), `${records}/`)) return "record";
+    if (records && insidePlace(full, records)) return "record";
     const hook = couldBeHook ? hookFile(folder) : null;
-    if (hook && sameText(full, hook)) return "hook";
+    if (hook && samePlace(full, hook)) return "hook";
   }
   return null;
 }

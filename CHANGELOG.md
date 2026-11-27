@@ -32,7 +32,8 @@ the 0.2.0 code against its README. Every change below is covered by a test or is
 - **Protected places are found where git really keeps them.** A git folder with another name
   (`--separate-git-dir`, a bare repository with worktrees), a hooks folder named by
   `core.hooksPath` (`.husky`), and `.git/config` now get the same refusal or question, from a
-  command and from the file-editing tools. Removing the whole hooks folder is asked about too.
+  command and from the file-editing tools. Removing the whole hooks folder is asked about too. A
+  path written through a link, or with a Windows short name, is the same place.
 - **Everyday PowerShell lines pass.** `git add -A; if ($?) { git commit -m "x" }`,
   `$ErrorActionPreference = "Stop"` and a pipe into `Out-Null` are no longer taken for a step
   that writes files. The same for `[[ ... ]]` and a plain `find` in Bash.

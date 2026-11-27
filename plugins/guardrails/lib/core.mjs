@@ -117,6 +117,26 @@ export function stateDir(cwd) {
   return slash(path.resolve(cwd, common, "guardrails"));
 }
 
+/**
+ * One spelling for a path: links and Windows short names (RUNNER~1) are resolved, also when the
+ * last parts of the path do not exist yet. git reports the real path, a person can type another.
+ */
+export function truePath(place) {
+  const plain = slash(place).replace(/\/+$/, "");
+  let head = plain;
+  let tail = "";
+  for (;;) {
+    try {
+      return slash(fs.realpathSync.native(head)).replace(/\/+$/, "") + tail;
+    } catch {
+      const up = path.posix.dirname(head);
+      if (up === head || up === ".") return plain;
+      tail = `/${path.posix.basename(head)}${tail}`;
+      head = up;
+    }
+  }
+}
+
 function findConfigFile(start) {
   let dir = path.resolve(start);
   for (let depth = 0; depth < 30; depth++) {
